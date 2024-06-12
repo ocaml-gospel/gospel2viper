@@ -1,1 +1,3 @@
-let () = print_endline "Hello, World!"
+open Gospel2viper
+
+let () = Format.printf "%s@." (Print_viper.print ())

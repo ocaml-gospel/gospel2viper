@@ -78,7 +78,8 @@ let rec pp_val_type_list = function
   | [] -> empty
   | (arg_name, arg_type) :: [] -> string arg_name ^^ colonspace ^^ pp_ty arg_type
   | (arg_name, arg_type) :: args  ->
-     string arg_name ^^ colonspace ^^ pp_ty arg_type ^^ (if args = [] then empty else commaspace) ^^ pp_val_type_list args
+     string arg_name ^^ colonspace ^^ pp_ty arg_type ^^
+      (if args = [] then empty else commaspace) ^^ pp_val_type_list args
 
 let pp_args args = parens (pp_val_type_list args)
 
@@ -86,7 +87,8 @@ let pp_returns returns =
   if returns = [] then empty else spacereturnsspace ^^ parens (pp_val_type_list returns)
 
 let pp_method_def m =
-  prefix 2 1 (group (methspace ^^ string m.method_name ^^ pp_args m.method_args ^^ pp_returns m.method_returns))
+  prefix 2 1
+  (group (methspace ^^ string m.method_name ^^ pp_args m.method_args ^^ pp_returns m.method_returns))
   (pp_spec m.method_spec)
 
 let pp_body = function
@@ -112,9 +114,11 @@ let pp_program p = pp_decls p
 ```
 predicate Mlist(l: Ref, view: Seq[Int])
 
+method create() returns (r: Ref) ensures Mlist(r, Seq[Int]())
+
 method push(x: Int, l: Ref, view: Seq[Int]) returns (r: Ref)
   requires Mlist(l, view)
-  ensures Mlist(l, Seq(x) ++ view)
+  ensures Mlist(l, Seq(x) ++ view))
 ```
 *)
 let prog : program = [
@@ -125,6 +129,20 @@ let prog : program = [
       ("view", TyApp("Seq", [TyApp("Int", [])]));
     ];
     pred_body = None;
+  };
+  DMethod {
+    method_name = "create";
+    method_args = [];
+    method_returns = [
+      ("r", TyApp("Ref", []));
+    ];
+    method_spec = {
+      spec_pre = [];
+      spec_post = [
+        TApp(None,"Mlist",
+          [TVar "r"; TSeq(TEmpty(TyApp("Int", [])))]);
+      ];
+    }
   };
   DMethod {
     method_name = "push";

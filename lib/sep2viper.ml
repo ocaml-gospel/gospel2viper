@@ -56,22 +56,34 @@ let to_int ?(neg = false) (c: Parsetree.constant) : int =
   | Pconst_float of label * char option *)
   | _ -> assert false
 
+let is_true bsymb = bsymb.ls_name.id_str = "true"
+let is_false bsymb = bsymb.ls_name.id_str = "false"
+
 let rec to_term (t: Tterm.term) : term =
   match t.t_node with
   | Tvar vsymb -> TVar vsymb.vs_name.id_str
   | Tconst c -> TConst (to_int c)
-  | Tapp (lsymb, terms) when lsymb.ls_name.id_path = ["Gospelstdlib"; "Sequence"] ->
+  | Tapp (b, []) when is_true  b -> TBool true
+  | Tapp (b, []) when is_false b -> TBool false
+  | Tapp (lsymb, terms)
+    when lsymb.ls_name.id_path = ["Gospelstdlib"; "Sequence"] ->
       TSeq(to_seq lsymb terms)
-  | Tapp (lsymb, [t1; t2]) when let prefix = "infix" in String.starts_with ~prefix lsymb.ls_name.id_str ->
+  | Tapp (lsymb, [t1; t2])
+    when String.starts_with ~prefix:"infix" lsymb.ls_name.id_str ->
       TInfix(to_term t1, keywords_map lsymb.ls_name.id_str, to_term t2)
-  | Tapp (lsymb, [t]) when let prefix = "prefix" in String.starts_with ~prefix lsymb.ls_name.id_str ->
+  | Tapp (lsymb, [t])
+    when String.starts_with ~prefix:"prefix" lsymb.ls_name.id_str ->
       (match t.t_node with
       | Tconst c -> TConst (to_int ~neg:true c)
       | _ -> assert false)
-  | Tapp (lsymb, [e]) when lsymb.ls_name.id_str = "integer_of_int" -> to_term e
-  | Tapp (lsymb, terms) -> TApp (None, lsymb.ls_name.id_str, to_term_list terms)
+  | Tapp (lsymb, [e])
+    when lsymb.ls_name.id_str = "integer_of_int" -> to_term e
+  | Tapp (lsymb, terms) ->
+      Format.printf "%s@." lsymb.ls_name.id_str;
+      TApp (None, lsymb.ls_name.id_str, to_term_list terms)
   | Tbinop (binop, t1, t2) ->
       TBinop (to_term t1, to_binop binop, to_term t2)
+  | Tnot t -> TNot (to_term t)
   (*
   | Tfield of term * lsymbol
   | Tif of term * term * term
@@ -79,7 +91,6 @@ let rec to_term (t: Tterm.term) : term =
   | Tcase of term * (pattern * term option * term) list
   | Tquant of quant * vsymbol list * term
   | Tlambda of pattern list * term
-  | Tbinop of binop * term * term
   | Tnot of term
   | Told of ter *)
   | _ -> assert false

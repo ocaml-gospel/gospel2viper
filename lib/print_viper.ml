@@ -18,6 +18,7 @@ let commaspace = string ", "
 let colonspace = string ": "
 let spaceconcatspace = string " ++ "
 let dotdot = string ".."
+let not = string "!"
 let spaceandandspace = string " && "
 let reqspace = string "requires "
 let ensspace = string "ensures "
@@ -51,6 +52,7 @@ let rec pp_ty = function
   | TyVar s -> string s
 and pp_term = function
   | TConst n -> string (string_of_int n)
+  | TBool b -> if b then string "true" else string"false"
   | TApp (_ty_opt, s, terms) ->
     group (string s ^^ parens (pp_list pp_term terms))
   | TVar s -> string s
@@ -58,6 +60,11 @@ and pp_term = function
     pp_term term1 ^^ space ^^ string sym ^^ space ^^ pp_term term2
   | TSeq seq -> pp_tseq seq
   | TBinop (t1, op, t2) -> parens(pp_term t1 ^^ space ^^ pp_op op ^^ space ^^ pp_term t2)
+  | TNot term ->
+      (match term with
+      | TConst _ | TBool _ | TVar _ -> not ^^ pp_term term
+      | _ -> not ^^ parens(pp_term term))
+
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)

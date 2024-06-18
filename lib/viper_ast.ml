@@ -5,11 +5,13 @@ type ty =
   | TyVar of string
 and term =
   | TConst of int
+  | TBool of bool
   | TApp of ty option * string * term list
   | TVar of string
   | TInfix of term * string * term
   | TSeq of tseq
   | TBinop of term * binop * term
+  | TNot of term
 and tseq =
   | TEmpty of ty
   | TSingleton of term

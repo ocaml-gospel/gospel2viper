@@ -165,4 +165,4 @@ let prog : program = [
   };
 ]
 
-let print (): string = run (PPrint.ToBuffer.pretty 0.9 !width) (pp_program prog)
+let print v: string = run (PPrint.ToBuffer.pretty 0.9 !width) (pp_program v)

@@ -1,3 +1,5 @@
+type binop = BAnd | BOr
+
 type ty =
   | TyApp of string * (ty list)
   | TyVar of string
@@ -7,6 +9,7 @@ and term =
   | TVar of string
   | TInfix of term * string * term
   | TSeq of tseq
+  | TBinop of term * binop * term
 and tseq =
   | TEmpty of ty
   | TSingleton of term

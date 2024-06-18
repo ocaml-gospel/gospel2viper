@@ -41,6 +41,10 @@ let rec pp_list pp_elem = function
   | elem :: [] -> pp_elem elem
   | elem :: elems -> pp_elem elem ^^ commaspace ^^ pp_list pp_elem elems
 
+let pp_op = function
+  | BAnd -> string "&&"
+  | BOr  -> string "||"
+
 let rec pp_ty = function
   | TyApp (s, tys) ->
     string s ^^ (if tys == [] then empty else brackets (pp_list pp_ty tys))
@@ -53,6 +57,7 @@ and pp_term = function
   | TInfix (term1, sym, term2) ->
     pp_term term1 ^^ space ^^ string sym ^^ space ^^ pp_term term2
   | TSeq seq -> pp_tseq seq
+  | TBinop (t1, op, t2) -> parens(pp_term t1 ^^ space ^^ pp_op op ^^ space ^^ pp_term t2)
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)

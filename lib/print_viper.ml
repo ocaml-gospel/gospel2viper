@@ -54,16 +54,13 @@ and pp_term = function
   | TConst n -> string (string_of_int n)
   | TBool b -> if b then string "true" else string"false"
   | TApp (_ty_opt, s, terms) ->
-    group (string s ^^ parens (pp_list pp_term terms))
+      group (string s ^^ parens (pp_list pp_term terms))
   | TVar s -> string s
   | TInfix (term1, sym, term2) ->
-    pp_term term1 ^^ space ^^ string sym ^^ space ^^ pp_term term2
+      parens(pp_term term1 ^^ space ^^ string sym ^^ space ^^ pp_term term2)
   | TSeq seq -> pp_tseq seq
   | TBinop (t1, op, t2) -> parens(pp_term t1 ^^ space ^^ pp_op op ^^ space ^^ pp_term t2)
-  | TNot term ->
-      (match term with
-      | TConst _ | TBool _ | TVar _ -> not ^^ pp_term term
-      | _ -> not ^^ parens(pp_term term))
+  | TNot term -> not ^^ pp_term term
 
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
@@ -120,61 +117,5 @@ let rec pp_decls = function
   | d :: decls -> group (pp_decl d) ^^ hardline ^^ hardline ^^ pp_decls decls
 
 let pp_program p = pp_decls p
-
-
-(* Exemple of a viper program that should return with width = 80:
-```
-predicate Mlist(l: Ref, view: Seq[Int])
-
-method create() returns (r: Ref) ensures Mlist(r, Seq[Int]())
-
-method push(x: Int, l: Ref, view: Seq[Int]) returns (r: Ref)
-  requires Mlist(l, view)
-  ensures Mlist(l, Seq(x) ++ view))
-```
-*)
-let prog : program = [
-  DPredicate {
-    pred_name = "Mlist";
-    pred_args = [
-      ("l", TyApp("Ref", []));
-      ("view", TyApp("Seq", [TyApp("Int", [])]));
-    ];
-    pred_body = None;
-  };
-  DMethod {
-    method_name = "create";
-    method_args = [];
-    method_returns = [
-      ("r", TyApp("Ref", []));
-    ];
-    method_spec = {
-      spec_pre = [];
-      spec_post = [
-        TApp(None,"Mlist",
-          [TVar "r"; TSeq(TEmpty(TyApp("Int", [])))]);
-      ];
-    }
-  };
-  DMethod {
-    method_name = "push";
-    method_args = [
-      ("x", TyApp("Int", []));
-      ("l", TyApp("Ref", []));
-      ("view", TyApp("Seq", [TyApp("Int", [])]));
-    ];
-    method_returns = [
-      ("r", TyApp("Ref", []));
-    ];
-    method_spec = {
-      spec_pre = [
-        TApp(None, "Mlist", [TVar "l"; TVar "view"]);
-      ];
-      spec_post = [
-        TApp(None, "Mlist", [TVar "l"; TSeq(TConcat((TSeq(TSingleton(TVar "x"))), TVar "view" ))])
-      ];
-    }
-  };
-]
 
 let print v: string = run (PPrint.ToBuffer.pretty 0.9 !width) (pp_program v)

@@ -17,7 +17,7 @@ and tseq =
   | TSingleton of term
   | TConcat of term * term
   | TGet of string * term
-  | TSub of string * term * term
+  | TSub of term * term * term option
 
 type spec = {
   spec_pre:  term list;

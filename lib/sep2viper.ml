@@ -102,6 +102,7 @@ and to_seq lsymb terms : tseq =
   match lsymb.ls_name.id_str, terms with
   | "empty", [] -> TEmpty (TyApp ("Int", []))
   | "cons", [fst; snd] -> TConcat (TSeq (TSingleton (to_term fst)), to_term snd)
+  | "tl", [seq] -> TSub (to_term seq, (TConst 1), None)
   | _ -> assert false
 
 let rec of_sep_term_list (s: sep_term list) : term list =

@@ -13,3 +13,9 @@ val push : int -> t -> unit
     consumes l @ t
     produces l @ t
     ensures l = cons x (old l) *)
+
+val pop : t -> int
+(*@ x = pop l
+    consumes l @ t
+    produces l @ t
+    ensures l = tl (old l) *)

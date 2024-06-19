@@ -62,8 +62,11 @@ and pp_tseq = function
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)
   | TConcat (term1, term2) -> pp_term term1 ^^ spaceconcatspace ^^ pp_term term2
   | TGet (s, term) -> string s ^^ brackets (pp_term term)
-  | TSub (s, term1, term2) ->
-    string s ^^ brackets (pp_term term1 ^^ dotdot ^^ pp_term term2)
+  | TSub (s, term1, term2_opt) ->
+    pp_term s ^^ brackets (pp_term term1 ^^ dotdot ^^ (
+    match term2_opt with
+    | Some term2 -> pp_term term2
+    | None -> empty))
 
 let pp_cond prefix conds =
   let rec pp_conds = function

@@ -7,11 +7,9 @@ let run (print : Buffer.t -> 'a -> unit) (x : 'a) : string =
   print b x;
   Buffer.contents b
 
-
 (* Requirements *)
 let indentation = 2
 let width = ref 80
-
 
 (* Definition of useful symbols and keywords *)
 let commaspace = string ", "
@@ -26,21 +24,19 @@ let methspace = string "method "
 let predspace = string "predicate "
 let spacereturnsspace = break 1 ^^ string "returns "
 
-
 (* Definition of blocks around document d *)
 let block n opening contents closing =
   group (opening ^^ nest n contents ^^ closing)
 let block = block indentation
-let parens d = block lparen (break 0 ^^ d) (break 0 ^^ rparen)
+let parens d   = block lparen   (break 0 ^^ d) (break 0 ^^ rparen)
 let brackets d = block lbracket (break 0 ^^ d) (break 0 ^^ rbracket)
-let braces d = block lbrace (break 1 ^^ d) (break 1 ^^ rbrace)
-
+let braces d   = block lbrace   (break 1 ^^ d) (break 1 ^^ rbrace)
 
 (* Printers for Viper's AST *)
 let rec pp_list pp_elem = function
   | [] -> empty
   | elem :: [] -> pp_elem elem
-  | elem :: elems -> pp_elem elem ^^ commaspace ^^ pp_list pp_elem elems
+  | elem :: tl -> pp_elem elem ^^ commaspace ^^ pp_list pp_elem tl
 
 let pp_op = function
   | BAnd -> string "&&"
@@ -52,16 +48,15 @@ let rec pp_ty = function
   | TyVar s -> string s
 and pp_term = function
   | TConst n -> string (string_of_int n)
-  | TBool b -> if b then string "true" else string"false"
+  | TBool  b -> if b then string "true" else string "false"
   | TApp (_ty_opt, s, terms) ->
-      group (string s ^^ parens (pp_list pp_term terms))
+    group (string s ^^ parens (pp_list pp_term terms))
   | TVar s -> string s
-  | TInfix (term1, sym, term2) ->
-      parens(pp_term term1 ^^ space ^^ string sym ^^ space ^^ pp_term term2)
+  | TInfix (term1, symb, term2) ->
+    parens (pp_term term1 ^^ space ^^ string symb ^^ space ^^ pp_term term2)
   | TSeq seq -> pp_tseq seq
-  | TBinop (t1, op, t2) -> parens(pp_term t1 ^^ space ^^ pp_op op ^^ space ^^ pp_term t2)
+  | TBinop (t1, symb, t2) -> parens (pp_term t1 ^^ space ^^ pp_op symb ^^ space ^^ pp_term t2)
   | TNot term -> not ^^ pp_term term
-
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)
@@ -74,8 +69,8 @@ let pp_cond prefix conds =
   let rec pp_conds = function
   | [] -> empty
   | h :: [] -> group (pp_term h)
-  | h :: t -> group (pp_term h) ^^ spaceandandspace ^^ group (pp_conds t) in
-  prefix ^^ pp_conds conds
+  | h :: t  -> group (pp_term h) ^^ spaceandandspace ^^ group (pp_conds t) in
+    prefix ^^ pp_conds conds
 
 let pp_spec (spec: spec) = match spec.spec_pre, spec.spec_post with
   | [], [] -> empty
@@ -86,9 +81,9 @@ let pp_spec (spec: spec) = match spec.spec_pre, spec.spec_post with
 let rec pp_val_type_list = function
   | [] -> empty
   | (arg_name, arg_type) :: [] -> string arg_name ^^ colonspace ^^ pp_ty arg_type
-  | (arg_name, arg_type) :: args  ->
-     string arg_name ^^ colonspace ^^ pp_ty arg_type ^^
-      (if args = [] then empty else commaspace) ^^ pp_val_type_list args
+  | (arg_name, arg_type) :: tl  ->
+    string arg_name ^^ colonspace ^^ pp_ty arg_type ^^
+    (if tl = [] then empty else commaspace) ^^ pp_val_type_list tl
 
 let pp_args args = parens (pp_val_type_list args)
 
@@ -97,8 +92,8 @@ let pp_returns returns =
 
 let pp_method_def m =
   prefix 2 1
-  (group (methspace ^^ string m.method_name ^^ pp_args m.method_args ^^ pp_returns m.method_returns))
-  (pp_spec m.method_spec)
+    (group (methspace ^^ string m.method_name ^^ pp_args m.method_args ^^ pp_returns m.method_returns))
+    (pp_spec m.method_spec)
 
 let pp_body = function
   | None   -> empty
@@ -108,8 +103,8 @@ let pp_predicate_def p =
   predspace ^^ string p.pred_name ^^ pp_args p.pred_args ^^ pp_body p.pred_body
 
 let pp_decl = function
-  | DPredicate predicate_def -> pp_predicate_def predicate_def
-  | DMethod method_def -> pp_method_def method_def
+  | DPredicate pred_def -> pp_predicate_def pred_def
+  | DMethod method_def  -> pp_method_def method_def
 
 let rec pp_decls = function
   | [] -> empty

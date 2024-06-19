@@ -16,7 +16,8 @@ let keywords_map = function
   | "infix <"  -> "<"
   | "infix <=" -> "<="
   | "infix ="  -> "=="
-  | "infix ++" -> "app"
+  (*
+  | "infix ++" -> "app" *)
   | default -> default
 
 let to_binop (op: Tterm.binop) : binop = match op with
@@ -34,7 +35,7 @@ let rec to_ty (ttypety: Ttypes.ty) : ty =
     TyApp (keywords_map tysymb.ts_ident.id_str , to_ty_list tys)
 and to_ty_list = function
     | [] -> []
-    | t :: tys -> to_ty t :: to_ty_list tys
+    | t :: tl -> to_ty t :: to_ty_list tl
 
 let to_args (l: Symbols.vsymbol list) =
   List.map (fun e -> e.vs_name.id_str, to_ty e.vs_ty) l
@@ -66,23 +67,23 @@ let rec to_term (t: Tterm.term) : term =
   | Tapp (b, []) when is_true  b -> TBool true
   | Tapp (b, []) when is_false b -> TBool false
   | Tapp (lsymb, terms)
-    when lsymb.ls_name.id_path = ["Gospelstdlib"; "Sequence"] ->
-      TSeq(to_seq lsymb terms)
+  when lsymb.ls_name.id_path = ["Gospelstdlib"; "Sequence"] ->
+    TSeq (to_seq lsymb terms)
   | Tapp (lsymb, [t1; t2])
-    when String.starts_with ~prefix:"infix" lsymb.ls_name.id_str ->
-      TInfix(to_term t1, keywords_map lsymb.ls_name.id_str, to_term t2)
+  when String.starts_with ~prefix:"infix" lsymb.ls_name.id_str ->
+    TInfix (to_term t1, keywords_map lsymb.ls_name.id_str, to_term t2)
   | Tapp (lsymb, [t])
-    when String.starts_with ~prefix:"prefix" lsymb.ls_name.id_str ->
-      (match t.t_node with
-      | Tconst c -> TConst (to_int ~neg:true c)
-      | _ -> assert false)
+  when String.starts_with ~prefix:"prefix" lsymb.ls_name.id_str ->
+    (match t.t_node with
+    | Tconst c -> TConst (to_int ~neg:true c)
+    | _ -> assert false)
   | Tapp (lsymb, [e])
-    when lsymb.ls_name.id_str = "integer_of_int" -> to_term e
+  when lsymb.ls_name.id_str = "integer_of_int" -> to_term e
   | Tapp (lsymb, terms) ->
-      Format.printf "%s@." lsymb.ls_name.id_str;
-      TApp (None, lsymb.ls_name.id_str, to_term_list terms)
+    Format.printf "%s@." lsymb.ls_name.id_str;
+    TApp (None, lsymb.ls_name.id_str, to_term_list terms)
   | Tbinop (binop, t1, t2) ->
-      TBinop (to_term t1, to_binop binop, to_term t2)
+    TBinop (to_term t1, to_binop binop, to_term t2)
   | Tnot t -> TNot (to_term t)
   (*
   | Tfield of term * lsymbol
@@ -91,17 +92,16 @@ let rec to_term (t: Tterm.term) : term =
   | Tcase of term * (pattern * term option * term) list
   | Tquant of quant * vsymbol list * term
   | Tlambda of pattern list * term
-  | Tnot of term
   | Told of ter *)
   | _ -> assert false
 and to_term_list (ts: Tterm.term list) : term list =
   match ts with
   | [] -> []
-  | t :: terms -> to_term t :: to_term_list terms
+  | term :: tl -> to_term term :: to_term_list tl
 and to_seq lsymb terms : tseq =
   match lsymb.ls_name.id_str, terms with
-  | "empty", [] -> TEmpty(TyApp("Int", []))
-  | "cons", [fst; snd] -> TConcat(TSeq(TSingleton(to_term fst)), to_term snd)
+  | "empty", [] -> TEmpty (TyApp ("Int", []))
+  | "cons", [fst; snd] -> TConcat (TSeq (TSingleton (to_term fst)), to_term snd)
   | _ -> assert false
 
 let rec of_sep_term_list (s: sep_term list) : term list =
@@ -117,8 +117,7 @@ let rec of_sep_term_list (s: sep_term list) : term list =
 
 let sep_def d =
   match d.d_node with
-  | Pred (id, args) ->
-    DPredicate {
+  | Pred (id, args) -> DPredicate {
     pred_name = id.id_str;
     pred_body = None;
     pred_args = to_args args; }
@@ -129,9 +128,7 @@ let sep_def d =
     method_spec = {
       spec_pre = of_sep_term_list t.triple_pre;
       spec_post = match t.triple_post with
-      | _vsymb, sep_term_list -> of_sep_term_list sep_term_list;
-    }
-  }
+      | _vsymb, sep_term_list -> of_sep_term_list sep_term_list; }}
   (*
   | Type of Ident.t * Ttypes.tvsymbol list  (** Type definition *)
   | Axiom of Tast.axiom  (** Axiom *)

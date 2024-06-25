@@ -31,6 +31,7 @@ let block = block indentation
 let parens d   = block lparen   (break 0 ^^ d) (break 0 ^^ rparen)
 let brackets d = block lbracket (break 0 ^^ d) (break 0 ^^ rbracket)
 let braces d   = block lbrace   (break 1 ^^ d) (break 1 ^^ rbrace)
+let pipes d    = (string "|") ^^ d ^^ (string "|")
 
 (* Printers for Viper's AST *)
 let rec pp_list pp_elem = function
@@ -61,7 +62,8 @@ and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)
   | TConcat (term1, term2) -> pp_term term1 ^^ spaceconcatspace ^^ pp_term term2
-  | TGet (s, term) -> string s ^^ brackets (pp_term term)
+  | TLength term -> pipes (pp_term term)
+  | TGet (s, term) -> (pp_term s) ^^ brackets (pp_term term)
   | TSub (s, term1, term2_opt) ->
     pp_term s ^^ brackets (pp_term term1 ^^ dotdot ^^ (
     match term2_opt with
@@ -108,10 +110,14 @@ let pp_predicate_def p =
 let pp_decl = function
   | DPredicate pred_def -> pp_predicate_def pred_def
   | DMethod method_def  -> pp_method_def method_def
+  | DBlank -> empty
+
+let is_blank = function | DBlank -> true | _ -> false
 
 let rec pp_decls = function
   | [] -> empty
   | d :: [] -> pp_decl d
+  | d :: decls when is_blank d -> pp_decls decls
   | d :: decls -> group (pp_decl d) ^^ hardline ^^ hardline ^^ pp_decls decls
 
 let pp_program p = pp_decls p

@@ -16,6 +16,7 @@ let keywords_map = function
   | "infix <"  -> "<"
   | "infix <=" -> "<="
   | "infix ="  -> "=="
+  | "infix <>" -> "!="
   (*
   | "infix ++" -> "app" *)
   | default -> default
@@ -64,22 +65,22 @@ let rec to_term (t: Tterm.term) : term =
   match t.t_node with
   | Tvar vsymb -> TVar vsymb.vs_name.id_str
   | Tconst c -> TConst (to_int c)
-  | Tapp (b, []) when is_true  b -> TBool true
-  | Tapp (b, []) when is_false b -> TBool false
-  | Tapp (lsymb, terms)
+  | Tapp (_, b, []) when is_true  b -> TBool true
+  | Tapp (_, b, []) when is_false b -> TBool false
+  | Tapp (_, lsymb, terms)
   when lsymb.ls_name.id_path = ["Gospelstdlib"; "Sequence"] ->
     TSeq (to_seq lsymb terms)
-  | Tapp (lsymb, [t1; t2])
+  | Tapp (_, lsymb, [t1; t2])
   when String.starts_with ~prefix:"infix" lsymb.ls_name.id_str ->
     TInfix (to_term t1, keywords_map lsymb.ls_name.id_str, to_term t2)
-  | Tapp (lsymb, [t])
+  | Tapp (_, lsymb, [t])
   when String.starts_with ~prefix:"prefix" lsymb.ls_name.id_str ->
     (match t.t_node with
     | Tconst c -> TConst (to_int ~neg:true c)
     | _ -> assert false)
-  | Tapp (lsymb, [e])
+  | Tapp (_, lsymb, [e])
   when lsymb.ls_name.id_str = "integer_of_int" -> to_term e
-  | Tapp (lsymb, terms) ->
+  | Tapp (_, lsymb, terms) ->
     Format.printf "%s@." lsymb.ls_name.id_str;
     TApp (None, lsymb.ls_name.id_str, to_term_list terms)
   | Tbinop (binop, t1, t2) ->
@@ -103,6 +104,8 @@ and to_seq lsymb terms : tseq =
   | "empty", [] -> TEmpty (TyApp ("Int", []))
   | "cons", [fst; snd] -> TConcat (TSeq (TSingleton (to_term fst)), to_term snd)
   | "tl", [seq] -> TSub (to_term seq, (TConst 1), None)
+  | "hd", [seq] -> TGet (to_term seq, (TConst 0))
+  | "length", [seq] -> TLength (to_term seq)
   | _ -> assert false
 
 let rec of_sep_term_list (s: sep_term list) : term list =
@@ -118,18 +121,21 @@ let rec of_sep_term_list (s: sep_term list) : term list =
 
 let sep_def d =
   match d.d_node with
-  | Pred (id, args) -> DPredicate {
-    pred_name = id.id_str;
+  | Pred rep_pred -> DPredicate {
+    pred_name = rep_pred.pred_name.id_str;
     pred_body = None;
-    pred_args = to_args args; }
-  | Triple t -> DMethod {
+    pred_args = to_args rep_pred.pred_args; }
+  | Triple t ->
+      let post_exists, sep_term_list = (match t.triple_post with
+      | exists, sep_term_list -> exists, sep_term_list) in
+    DMethod {
     method_name = t.triple_name.id_str;
     method_args = to_args t.triple_vars;
-    method_returns = to_args t.triple_rets;
+    method_returns = to_args (post_exists @ t.triple_rets);
     method_spec = {
       spec_pre = of_sep_term_list t.triple_pre;
-      spec_post = match t.triple_post with
-      | _vsymb, sep_term_list -> of_sep_term_list sep_term_list; }}
+      spec_post = of_sep_term_list sep_term_list; }}
+  | Type _ -> DBlank
   (*
   | Type of Ident.t * Ttypes.tvsymbol list  (** Type definition *)
   | Axiom of Tast.axiom  (** Axiom *)

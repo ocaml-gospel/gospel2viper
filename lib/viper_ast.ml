@@ -16,8 +16,9 @@ and tseq =
   | TEmpty of ty
   | TSingleton of term
   | TConcat of term * term
-  | TGet of string * term
-  | TSub of term * term * term option
+  | TLength of term
+  | TGet of term * term (* TGet seq_name pos *)
+  | TSub of term * term * term option (* TSub seq_name start_pos end_pos *)
 
 type spec = {
   spec_pre:  term list;
@@ -40,5 +41,6 @@ type method_def = {
 type decl =
   | DPredicate of predicate_def
   | DMethod of method_def
+  | DBlank
 
 type program = decl list

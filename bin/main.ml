@@ -1,6 +1,6 @@
-open Gospel2viper
+open Viper
 open Gospel
-open Tmodule
+(* open Tmodule *)
 open Format
 
 let fname = ref None
@@ -24,38 +24,38 @@ let usage () =
 
 let set_file f =
   match !fname with
-  | None when Filename.check_suffix f ".mli" -> fname := Some f
+  | None when Filename.check_suffix f ".ml" -> fname := Some f
   | _ -> usage ()
 
 let () = Arg.parse spec set_file usage_msg
 let fname = match !fname with None -> usage () | Some f -> f
 
-let path2module p =
-  Filename.basename p |> Filename.chop_extension |> String.capitalize_ascii
+(* let path2module p =
+  Filename.basename p |> Filename.chop_extension |> String.capitalize_ascii *)
 
 let base_fname f = Filename.basename f |> Filename.chop_extension
 
-let type_check load_path name sigs =
+(* let type_check load_path name sigs =
   let md = init_muc name in
   let mn = path2module name in
   let penv =
      Utils.Sstr.singleton mn |> Typing.penv load_path
   in
   let md = List.fold_left (Typing.type_sig_item penv) md sigs in
-  wrap_up_muc md
+  wrap_up_muc md *)
 
 let () =
   let open Parser_frontend in
-    let load_path = [ Filename.dirname fname ] in
-  let ocaml = parse_ocaml fname in
-  let module_nm = path2module fname in
-  let sigs = parse_gospel ~filename:fname ocaml module_nm in
-  let file = type_check load_path fname sigs in
-  let file_sep = Tast2sep.process_sigs file in
-  let file_viper = Sep2viper.sep_defs file_sep in
-  let out_fname = base_fname fname ^ "_mli.vpr" in
+    (* let load_path = [ Filename.dirname fname ] in *)
+  let ic = open_in fname in
+  let lb = Lexing.from_channel ic in
+  Location.init lb fname;
+  let ocaml_structure = parse_ocaml_structure_lb lb in
+  let ocaml = Uattr2spec.structure ~filename:fname ocaml_structure in
+  let file_viper = Gospel2viper.cameleer_structure ocaml in
+  let out_fname = base_fname fname ^ "_ml.vpr" in
   let base_dir =
-    "/home/cha/Documents/github/gospel2viper/example/translation"
+    "/home/cha/Documents/github/gospel2viper/example/translation_ml_"
     ^ (String.capitalize_ascii (base_fname fname)) in
   let () = if not (Sys.file_exists base_dir) then
     Sys.mkdir base_dir 0o755 else () in

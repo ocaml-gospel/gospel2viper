@@ -1,4 +1,4 @@
 (executable
  (public_name gospel2viper)
  (name main)
- (libraries gospel2viper))
+ (libraries viper))

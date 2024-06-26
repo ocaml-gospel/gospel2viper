@@ -16,6 +16,7 @@ let commaspace = string ", "
 let colonspace = string ": "
 let spaceconcatspace = string " ++ "
 let dotdot = string ".."
+let dot = string "."
 let not = string "!"
 let spaceandandspace = string " && "
 let reqspace = string "requires "
@@ -23,6 +24,10 @@ let ensspace = string "ensures "
 let methspace = string "method "
 let predspace = string "predicate "
 let spacereturnsspace = break 1 ^^ string "returns "
+
+let map_keywords = function
+  | "int" -> "Int"
+  | default -> default
 
 (* Definition of blocks around document d *)
 let block n opening contents closing =
@@ -45,7 +50,7 @@ let pp_op = function
 
 let rec pp_ty = function
   | TyApp (s, tys) ->
-    string s ^^ (if tys == [] then empty else brackets (pp_list pp_ty tys))
+    string (map_keywords s) ^^ (if tys == [] then empty else brackets (pp_list pp_ty tys))
   | TyVar s -> string s
 and pp_term = function
   | TConst n -> string (string_of_int n)
@@ -58,6 +63,7 @@ and pp_term = function
   | TSeq seq -> pp_tseq seq
   | TBinop (t1, symb, t2) -> parens (pp_term t1 ^^ space ^^ pp_op symb ^^ space ^^ pp_term t2)
   | TNot term -> not ^^ pp_term term
+  | TField (ref, field) -> pp_term ref ^^ dot ^^ pp_term field
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)
@@ -110,6 +116,8 @@ let pp_predicate_def p =
 let pp_decl = function
   | DPredicate pred_def -> pp_predicate_def pred_def
   | DMethod method_def  -> pp_method_def method_def
+  | DField (name, ty) ->
+      string "field" ^^ space ^^ string name ^^ colonspace ^^ pp_ty ty
   | DBlank -> empty
 
 let is_blank = function | DBlank -> true | _ -> false

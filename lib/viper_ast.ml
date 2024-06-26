@@ -12,6 +12,7 @@ and term =
   | TSeq of tseq
   | TBinop of term * binop * term
   | TNot of term
+  | TField of term * term
 and tseq =
   | TEmpty of ty
   | TSingleton of term
@@ -41,6 +42,7 @@ type method_def = {
 type decl =
   | DPredicate of predicate_def
   | DMethod of method_def
+  | DField of string * ty
   | DBlank
 
 type program = decl list

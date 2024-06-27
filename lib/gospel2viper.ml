@@ -4,6 +4,8 @@ open Viper_ast
 type type_storage =
   {mutable fields: string list; models: (string * string) list}
 
+let ty_ht = Hashtbl.create 8
+
 let rec flat_list l =
   match l with
   | [] -> []
@@ -75,20 +77,20 @@ let get_ty_lbl pty =
   *)
   | _ -> assert false
 
-let rec to_args (ty_ht : (string, type_storage) Hashtbl.t) fl =
+let rec to_args fl =
   match fl with
   | [] -> []
   | (_loc, preid, pty) :: tl ->
     let str = get_ty_lbl pty in
     (match Hashtbl.find_opt ty_ht str with
     | None ->
-      (preid.Identifier.Preid.pid_str, TyApp (str, [])) :: to_args ty_ht tl
+      (preid.Identifier.Preid.pid_str, TyApp (str, [])) :: to_args tl
     | Some l ->
       let rec add_models = function
       | [] -> []
       | (m, t) :: tl -> (m, TyApp (keyword t, [])) :: add_models tl in
       ((preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) ::
-      (add_models l.models)) @ to_args ty_ht tl)
+      (add_models l.models)) @ to_args tl)
 
 let rec get_spec_fields (spec: Gospel.Uast.field list) =
   match spec with
@@ -129,6 +131,7 @@ let rec to_term (arg_names : string list) = function
   | Tpreid x -> let var_name = qualid_to_string x in
     if List.mem var_name arg_names then TVar (None, var_name)
     else TVar (Some (List.hd arg_names), var_name)
+  | Tfield (_term, qualid) -> TVar (None, qualid_to_string qualid)
   (*
   | Tidapp of qualid * term list
   | Tfield of term * qualid
@@ -162,7 +165,7 @@ let to_def fields_to_acc arg_names term_opt =
       BAnd,
       to_term arg_names term.Gospel.Uast.term_desc))
 
-let rec scan_args ty_ht fl =
+let rec scan_args fl =
   match fl with
   | [] -> []
   | (_loc, preid, pty) :: tl ->
@@ -173,9 +176,9 @@ let rec scan_args ty_ht fl =
       let rec iter = function
       | [] -> []
       | n :: tl -> (preid.Identifier.Preid.pid_str, n) :: iter tl in
-      iter l.fields) @ scan_args ty_ht tl
+      iter l.fields) @ scan_args tl
 
-let struct_desc ty_ht d =
+let struct_desc d =
   match d with
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
     (* For the moment, no "and" in type declaration *)
@@ -186,9 +189,9 @@ let struct_desc ty_ht d =
     let fields, r = to_type_def ty_decl in
     Hashtbl.add ty_ht ty_decl.tname.txt {fields; models}; r
   | Str_function f ->
-    let args = to_args ty_ht f.fun_params in
+    let args = to_args f.fun_params in
     let arg_names = List.map (fun (n, _t) -> n) args in
-    let fields_to_acc = scan_args ty_ht f.fun_params in
+    let fields_to_acc = scan_args f.fun_params in
     [DPredicate {
       pred_name = f.fun_name.pid_str;
       pred_body = to_def fields_to_acc arg_names f.fun_def;
@@ -217,8 +220,7 @@ let struct_desc ty_ht d =
   *)
   | _ -> assert false
 
-let cameleer_structure_item ty_ht i = struct_desc ty_ht i.Uast.sstr_desc
+let cameleer_structure_item i = struct_desc i.Uast.sstr_desc
 
 let cameleer_structure (s: Uast.s_structure) =
-  let ty_ht = Hashtbl.create 8 in
-  flat_list (List.map (fun item -> cameleer_structure_item ty_ht item) s)
+  flat_list (List.map (fun item -> cameleer_structure_item item) s)

@@ -1,43 +1,57 @@
 open Gospel
 open Viper_ast
 
+type type_storage =
+  {mutable fields: string list; models: (string * string) list}
+
 let rec flat_list l =
   match l with
   | [] -> []
   | hd :: tl -> hd @ flat_list tl
 
-let pp_hashtbl ty_ht = Hashtbl.iter (fun x y ->
-  Printf.printf "%s -> \n" x; Format.printf "";
-  List.iter (fun (m, t)-> Format.printf " [%s: %s] " m t) y;
-  Format.printf "@.") ty_ht
+let keyword = function
+  | "int" -> "Int"
+  | "infix +"  -> "+"
+  | "infix -"  -> "-"
+  | "infix *"  -> "*"
+  | "infix /"  -> "/"
+  | "infix >"  -> ">"
+  | "infix >=" -> ">="
+  | "infix <"  -> "<"
+  | "infix <=" -> "<="
+  | "infix ="  -> "=="
+  | "infix <>" -> "!="
+  | default -> default
 
 let to_type t =
   match t.Parsetree.ptyp_desc with
   | Ptyp_constr (lident, []) ->
     (match lident.txt with
-    | Lident s -> TyApp (s, [])
+    | Lident s -> TyApp (keyword s, [])
     | _ -> assert false)
   | Ptyp_constr (_lident, _l) -> assert false
-    (*
-    | Ptyp_any  (** [_] *)
-    | Ptyp_var of string  (** A type variable such as ['a] *)
-    | Ptyp_arrow of arg_label * core_type * core_type
-    | Ptyp_tuple of core_type list
-    | Ptyp_object of object_field list * closed_flag
-    | Ptyp_class of Longident.t loc * core_type list
-    | Ptyp_alias of core_type * string  (** [T as 'a]. *)
-    | Ptyp_variant of row_field list * closed_flag * label list option
-    | Ptyp_poly of string loc list * core_type
-    | Ptyp_package of package_type  (** [(module S)]. *)
-    | Ptyp_extension of extension  (** [[%id]]. *)
-    *)
-    | _ -> assert false
+  (*
+  | Ptyp_any  (** [_] *)
+  | Ptyp_var of string  (** A type variable such as ['a] *)
+  | Ptyp_arrow of arg_label * core_type * core_type
+  | Ptyp_tuple of core_type list
+  | Ptyp_object of object_field list * closed_flag
+  | Ptyp_class of Longident.t loc * core_type list
+  | Ptyp_alias of core_type * string  (** [T as 'a]. *)
+  | Ptyp_variant of row_field list * closed_flag * label list option
+  | Ptyp_poly of string loc list * core_type
+  | Ptyp_package of package_type  (** [(module S)]. *)
+  | Ptyp_extension of extension  (** [[%id]]. *)
+  *)
+  | _ -> assert false
 
-let rec to_field (lbls: Parsetree.label_declaration list) : decl list =
+let rec to_field lbls =
   match lbls with
-  | [] -> []
+  | [] -> [], []
   | lbl :: tl ->
-    DField (lbl.pld_name.txt, to_type lbl.pld_type) :: to_field tl
+    let sl, decls = to_field tl in
+    lbl.Parsetree.pld_name.txt ::
+    sl, DField (lbl.pld_name.txt, to_type lbl.pld_type) :: decls
 
 let to_type_def decl =
   match decl.Uast.tkind with
@@ -50,11 +64,6 @@ let to_type_def decl =
   *)
   | _ -> assert false
 
-let tmp_known_types = function
-  | "int" -> true
-  | _ -> false
-
-
 let get_ty_lbl pty =
   match pty with
   | Uast.PTtyapp (Qpreid preid, []) -> preid.pid_str
@@ -66,19 +75,20 @@ let get_ty_lbl pty =
   *)
   | _ -> assert false
 
-let rec to_args ty_ht fl =
+let rec to_args (ty_ht : (string, type_storage) Hashtbl.t) fl =
   match fl with
   | [] -> []
   | (_loc, preid, pty) :: tl ->
     let str = get_ty_lbl pty in
     (match Hashtbl.find_opt ty_ht str with
-      | None -> (preid.Identifier.Preid.pid_str, TyApp (str, [])) :: to_args ty_ht tl
-      | Some l ->
-        let rec add_models (l: (string * string) list) = match l with
-          | [] -> []
-          | (m, t) :: tl -> (m, TyApp (t, [])) :: add_models tl
-        in
-        ((preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) :: (add_models l)) @ to_args ty_ht tl)
+    | None ->
+      (preid.Identifier.Preid.pid_str, TyApp (str, [])) :: to_args ty_ht tl
+    | Some l ->
+      let rec add_models = function
+      | [] -> []
+      | (m, t) :: tl -> (m, TyApp (keyword t, [])) :: add_models tl in
+      ((preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) ::
+      (add_models l.models)) @ to_args ty_ht tl)
 
 let rec get_spec_fields (spec: Gospel.Uast.field list) =
   match spec with
@@ -86,21 +96,103 @@ let rec get_spec_fields (spec: Gospel.Uast.field list) =
   | hd :: tl ->
     (hd.Uast.f_preid.pid_str, get_ty_lbl hd.Uast.f_pty) :: get_spec_fields tl
 
+let to_const = function
+  | Parsetree.Pconst_integer (n, _char_opt) -> TConst (int_of_string n)
+  (*
+  | Pconst_char of char
+  | Pconst_string of label * location * label option
+  | Pconst_float of label * char option
+  *)
+  | _ -> assert false
+
+let to_binop = function
+  | Uast.Tand | Tand_asym -> BAnd
+  | Tor | Tor_asym -> BOr
+  | Timplies | Tiff -> assert false
+
+let qualid_to_string = function
+  | Uast.Qpreid s -> s.pid_str
+  | Qdot _ -> assert false
+
+let rec to_term (arg_names : string list) = function
+  | Gospel.Uast.Ttrue -> TBool true
+  | Tfalse -> TBool false
+  | Tconst c -> to_const c
+  | Tbinop (t1, binop, t2) -> TBinop
+    (to_term arg_names t1.term_desc,
+    to_binop binop,
+    to_term arg_names t2.term_desc)
+  | Tinfix (t1, infix, t2) -> TInfix
+    (to_term arg_names t1.term_desc,
+    keyword infix.pid_str,
+    to_term arg_names t2.term_desc)
+  | Tpreid x -> let var_name = qualid_to_string x in
+    if List.mem var_name arg_names then TVar (None, var_name)
+    else TVar (Some (List.hd arg_names), var_name)
+  (*
+  | Tidapp of qualid * term list
+  | Tfield of term * qualid
+  | Tapply of term * term
+  | Tnot of term
+  | Tif of term * term * term
+  | Tquant of quant * binder list * term
+  | Tattr of string * term
+  | Tlet of Preid.t * term * term
+  | Tcase of term * (pattern * term) list
+  | Tcast of term * pty
+  | Ttuple of term list
+  | Trecord of (qualid * term) list
+  | Tupdate of term * (qualid * term) list
+  | Tscope of qualid * term
+  | Told of term
+  *)
+  | _ -> assert false
+
+let to_def fields_to_acc arg_names term_opt =
+  match term_opt with
+  | None -> None
+  | Some term ->
+    let rec iter = function
+    | [] -> assert false
+    | [(type_name, field)] -> TAcc (type_name, field)
+    | (type_name, field) :: tl -> TBinop
+      (TAcc(type_name, field), BAnd, iter tl) in
+      Some (TBinop
+      (iter fields_to_acc,
+      BAnd,
+      to_term arg_names term.Gospel.Uast.term_desc))
+
+let rec scan_args ty_ht fl =
+  match fl with
+  | [] -> []
+  | (_loc, preid, pty) :: tl ->
+    let ty_str = get_ty_lbl pty in
+    (match Hashtbl.find_opt ty_ht ty_str with
+    | None   -> []
+    | Some l ->
+      let rec iter = function
+      | [] -> []
+      | n :: tl -> (preid.Identifier.Preid.pid_str, n) :: iter tl in
+      iter l.fields) @ scan_args ty_ht tl
+
 let struct_desc ty_ht d =
   match d with
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
     (* For the moment, no "and" in type declaration *)
-    let model_typed_list = (
-      match ty_decl.tspec with
+    let models =
+      (match ty_decl.tspec with
       | None -> []
       | Some spec -> get_spec_fields spec.ty_field) in
-    Hashtbl.add ty_ht ty_decl.tname.txt model_typed_list;
-    to_type_def ty_decl
+    let fields, r = to_type_def ty_decl in
+    Hashtbl.add ty_ht ty_decl.tname.txt {fields; models}; r
   | Str_function f ->
+    let args = to_args ty_ht f.fun_params in
+    let arg_names = List.map (fun (n, _t) -> n) args in
+    let fields_to_acc = scan_args ty_ht f.fun_params in
     [DPredicate {
       pred_name = f.fun_name.pid_str;
-      pred_body = None;
-      pred_args = to_args ty_ht f.fun_params;
+      pred_body = to_def fields_to_acc arg_names f.fun_def;
+      pred_args = args;
     }]
   (*
   | Str_eval of s_expression * attributes
@@ -124,7 +216,6 @@ let struct_desc ty_ht d =
   | Str_ghost_open of open_declaration
   *)
   | _ -> assert false
-
 
 let cameleer_structure_item ty_ht i = struct_desc ty_ht i.Uast.sstr_desc
 

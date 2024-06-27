@@ -7,12 +7,13 @@ and term =
   | TConst of int
   | TBool of bool
   | TApp of ty option * string * term list
-  | TVar of string
+  | TVar of string option * string
   | TInfix of term * string * term
   | TSeq of tseq
   | TBinop of term * binop * term
   | TNot of term
   | TField of term * term
+  | TAcc of string * string
 and tseq =
   | TEmpty of ty
   | TSingleton of term

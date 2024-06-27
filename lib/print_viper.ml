@@ -23,11 +23,8 @@ let reqspace = string "requires "
 let ensspace = string "ensures "
 let methspace = string "method "
 let predspace = string "predicate "
+let acc = string "acc"
 let spacereturnsspace = break 1 ^^ string "returns "
-
-let map_keywords = function
-  | "int" -> "Int"
-  | default -> default
 
 (* Definition of blocks around document d *)
 let block n opening contents closing =
@@ -50,20 +47,24 @@ let pp_op = function
 
 let rec pp_ty = function
   | TyApp (s, tys) ->
-    string (map_keywords s) ^^ (if tys == [] then empty else brackets (pp_list pp_ty tys))
+    string s ^^ (if tys == [] then empty else brackets (pp_list pp_ty tys))
   | TyVar s -> string s
 and pp_term = function
   | TConst n -> string (string_of_int n)
   | TBool  b -> if b then string "true" else string "false"
   | TApp (_ty_opt, s, terms) ->
     group (string s ^^ parens (pp_list pp_term terms))
-  | TVar s -> string s
+  | TVar (prefix, s) ->
+    (match prefix with
+    | None -> empty
+    | Some n -> string n ^^ dot) ^^ string s
   | TInfix (term1, symb, term2) ->
     parens (pp_term term1 ^^ space ^^ string symb ^^ space ^^ pp_term term2)
   | TSeq seq -> pp_tseq seq
   | TBinop (t1, symb, t2) -> parens (pp_term t1 ^^ space ^^ pp_op symb ^^ space ^^ pp_term t2)
   | TNot term -> not ^^ pp_term term
   | TField (ref, field) -> pp_term ref ^^ dot ^^ pp_term field
+  | TAcc (model, field) -> acc ^^ parens (string model ^^ dot ^^ string field)
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)
@@ -108,7 +109,7 @@ let pp_method_def m =
 
 let pp_body = function
   | None   -> empty
-  | Some t -> pp_term t
+  | Some t -> braces (pp_term t)
 
 let pp_predicate_def p =
   predspace ^^ string p.pred_name ^^ pp_args p.pred_args ^^ pp_body p.pred_body

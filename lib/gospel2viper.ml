@@ -2,9 +2,9 @@ open Gospel
 open Viper_ast
 
 type type_storage =
-  {mutable fields: string list; models: (string * string) list}
+  {mutable fields: string list; mutable models: (string * ty) list}
 
-let ty_ht = Hashtbl.create 8
+  let ty_ht = Hashtbl.create 8
 
 let rec flat_list l =
   match l with
@@ -13,6 +13,7 @@ let rec flat_list l =
 
 let keyword = function
   | "int" -> "Int"
+  | "sequence" -> "Seq"
   | "infix +"  -> "+"
   | "infix -"  -> "-"
   | "infix *"  -> "*"
@@ -29,7 +30,9 @@ let to_type t =
   match t.Parsetree.ptyp_desc with
   | Ptyp_constr (lident, []) ->
     (match lident.txt with
-    | Lident s -> TyApp (keyword s, [])
+    | Lident s ->
+      if Hashtbl.mem ty_ht s then TyApp("Ref", [])
+      else TyApp (keyword s, [])
     | _ -> assert false)
   | Ptyp_constr (_lident, _l) -> assert false
   (*
@@ -52,8 +55,8 @@ let rec to_field lbls =
   | [] -> [], []
   | lbl :: tl ->
     let sl, decls = to_field tl in
-    lbl.Parsetree.pld_name.txt ::
-    sl, DField (lbl.pld_name.txt, to_type lbl.pld_type) :: decls
+    lbl.Parsetree.pld_name.txt :: sl,
+    DField (lbl.pld_name.txt, to_type lbl.pld_type) :: decls
 
 let to_type_def decl =
   match decl.Uast.tkind with
@@ -66,16 +69,32 @@ let to_type_def decl =
   *)
   | _ -> assert false
 
-let get_ty_lbl pty =
+let qualid_to_string = function
+  | Uast.Qpreid s -> s.pid_str
+  | Qdot _ -> assert false
+
+let rec get_ty_lbl pty =
   match pty with
-  | Uast.PTtyapp (Qpreid preid, []) -> preid.pid_str
-  | Uast.PTtyapp (_qualid, _l) -> assert false
+  | Uast.PTtyapp (Qpreid preid, []) ->
+    keyword preid.pid_str
+  | Uast.PTtyapp (_qualid, hd :: _tl) ->
+    get_ty_lbl hd
   (*
   | PTtyvar of Preid.t
   | PTtuple of pty list
   | PTarrow of labelled_arg * pty * pty
   *)
   | _ -> assert false
+
+let rec to_ty (ty: Uast.pty) : ty =
+  match ty with
+  | PTtyapp (qualid, tys) ->
+    TyApp (keyword (qualid_to_string qualid), to_ty_list tys)
+  | _ -> assert false
+and to_ty_list =
+  function
+    | [] -> []
+    | t :: tl -> to_ty t :: to_ty_list tl
 
 let rec to_args fl =
   match fl with
@@ -86,17 +105,14 @@ let rec to_args fl =
     | None ->
       (preid.Identifier.Preid.pid_str, TyApp (str, [])) :: to_args tl
     | Some l ->
-      let rec add_models = function
-      | [] -> []
-      | (m, t) :: tl -> (m, TyApp (keyword t, [])) :: add_models tl in
       ((preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) ::
-      (add_models l.models)) @ to_args tl)
+      l.models) @ to_args tl)
 
-let rec get_spec_fields (spec: Gospel.Uast.field list) =
+let rec get_spec_fields (spec: Gospel.Uast.field list) : (string * ty) list =
   match spec with
   | [] -> []
   | hd :: tl ->
-    (hd.Uast.f_preid.pid_str, get_ty_lbl hd.Uast.f_pty) :: get_spec_fields tl
+    (hd.Uast.f_preid.pid_str, to_ty hd.Uast.f_pty) :: get_spec_fields tl
 
 let to_const = function
   | Parsetree.Pconst_integer (n, _char_opt) -> TConst (int_of_string n)
@@ -111,10 +127,6 @@ let to_binop = function
   | Uast.Tand | Tand_asym -> BAnd
   | Tor | Tor_asym -> BOr
   | Timplies | Tiff -> assert false
-
-let qualid_to_string = function
-  | Uast.Qpreid s -> s.pid_str
-  | Qdot _ -> assert false
 
 let rec to_term (arg_names : string list) = function
   | Gospel.Uast.Ttrue -> TBool true
@@ -186,8 +198,10 @@ let struct_desc d =
       (match ty_decl.tspec with
       | None -> []
       | Some spec -> get_spec_fields spec.ty_field) in
+    Hashtbl.add ty_ht ty_decl.tname.txt {fields = []; models = []};
     let fields, r = to_type_def ty_decl in
-    Hashtbl.add ty_ht ty_decl.tname.txt {fields; models}; r
+    Hashtbl.replace ty_ht ty_decl.tname.txt {fields; models}; r
+    (* pp_hashtbl ty_ht; r *)
   | Str_function f ->
     let args = to_args f.fun_params in
     let arg_names = List.map (fun (n, _t) -> n) args in

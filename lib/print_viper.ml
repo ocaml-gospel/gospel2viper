@@ -131,7 +131,7 @@ let pp_predicate_def p =
   predspace ^^ string p.pred_name ^^ pp_args p.pred_args ^^ space ^^ pp_body p.pred_body
 
 let pp_function_def f =
-  funspace ^^ string f.function_name ^^ pp_args f.function_args ^^ colonspace ^^ pp_ty f.function_rety ^^ pp_spec f.function_spec ^^ space ^^ pp_body f.function_body
+  funspace ^^ string f.function_name ^^ pp_args f.function_args ^^ colonspace ^^ pp_ty f.function_rety ^^ space ^^ pp_spec f.function_spec ^^ space ^^ pp_body f.function_body
 
 let pp_decl = function
   | DPredicate pred_def -> pp_predicate_def pred_def

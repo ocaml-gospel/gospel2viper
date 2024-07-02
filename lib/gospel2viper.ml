@@ -230,6 +230,16 @@ let rec scan_args fl =
       | n :: tl -> (preid.Identifier.Preid.pid_str, n) :: iter tl in
       iter l.fields) @ scan_args tl
 
+let to_spec arg_names (spec_opt : Gospel.Uast.fun_spec option): spec =
+  match spec_opt with
+  | None -> { spec_pre  = []; spec_post = []; }
+  | Some spec ->
+    let spec_pre = List.map (fun t ->
+      to_term arg_names t.Uast.term_desc) spec.fun_req in
+    let spec_post = List.map (fun t ->
+      to_term arg_names t.Uast.term_desc) spec.fun_ens in
+    {spec_pre; spec_post}
+
 let struct_desc d =
   match d with
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
@@ -255,10 +265,7 @@ let struct_desc d =
         function_name = f.fun_name.pid_str;
         function_args = args;
         function_rety = to_ty ret_ty;
-        function_spec = {
-          spec_pre  = [];
-          spec_post = [];
-        };
+        function_spec = to_spec arg_names f.fun_spec;
         function_body = to_fun_body arg_names f.fun_def;
     }])
   (*

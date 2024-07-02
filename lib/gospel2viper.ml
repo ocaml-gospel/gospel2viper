@@ -89,10 +89,9 @@ let rec to_ty (ty: Uast.pty) : ty =
   | PTtyapp (qualid, tys) ->
     TyApp (keyword (qualid_to_string qualid), to_ty_list tys)
   | _ -> assert false
-and to_ty_list =
-  function
-    | [] -> []
-    | t :: tl -> to_ty t :: to_ty_list tl
+and to_ty_list = function
+  | [] -> []
+  | t :: tl -> to_ty t :: to_ty_list tl
 
 let rec to_args fl =
   match fl with
@@ -104,7 +103,7 @@ let rec to_args fl =
     then (preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) :: to_args tl
     else (preid.Identifier.Preid.pid_str, ty) :: to_args tl
 
-let rec get_spec_fields (spec: Gospel.Uast.field list) : (string * ty) list =
+let rec get_spec_fields spec =
   match spec with
   | [] -> []
   | hd :: tl ->
@@ -129,44 +128,43 @@ let rec to_term (arg_names : string list) = function
   | Gospel.Uast.Ttrue -> TBool true
   | Tfalse -> TBool false
   | Tconst c -> to_const c
-  | Tbinop (t1, binop, t2) -> TBinop
-    (to_term arg_names t1.term_desc,
+  | Tbinop (t1, binop, t2) -> TBinop (
+    to_term arg_names t1.term_desc,
     to_binop binop,
     to_term arg_names t2.term_desc)
-  | Tinfix (t1, infix, t2) -> TInfix
-    (to_term arg_names t1.term_desc,
+  | Tinfix (t1, infix, t2) -> TInfix (
+    to_term arg_names t1.term_desc,
     keyword infix.pid_str,
     to_term arg_names t2.term_desc)
   | Tpreid x -> TVar (None, qualid_to_string x)
   | Tfield (term, qualid) ->
     let arg = qualid_to_string qualid in
-    TVar ((if List.mem arg arg_names then None else
-      Some (to_term arg_names term.term_desc)), arg)
+    TVar ((if List.mem arg arg_names then None
+    else Some (to_term arg_names term.term_desc)), arg)
   | Tapply (hd, term) ->
     let argv = to_fun arg_names hd @ to_fun arg_names term in
     let args = List.tl argv in
-    let fun_name =
-      (match List.hd argv with
-      | TVar (_, s) -> s
-      | _ -> assert false) in
+    let fun_name = (match List.hd argv with
+    | TVar (_, s) -> s
+    | _ -> assert false) in
     (match fun_name with
-      | "length" -> TSeq (TLength (List.hd args))
-      | "get"    ->
-        (match args with
-        | [n; num] -> TSeq (TGet (n, num))
-        | _ -> assert false)
-      | "tl"     -> TSeq(TSub (List.hd args, (TConst 1), None))
-      | "hd"     -> TSeq(TGet (List.hd args, (TConst 0)))
-      | default -> TApp(None, default, args))
+    | "get" -> (match args with
+      | [n; num] -> TSeq (TGet (n, num))
+      | _ -> assert false)
+    | "length" -> TSeq (TLength (List.hd args))
+    | "tl"     -> TSeq(TSub (List.hd args, (TConst 1), None))
+    | "hd"     -> TSeq(TGet (List.hd args, (TConst 0)))
+    | default  -> TApp(None, default, args))
   | Tlet (name, t1, t2) ->
-    TLet (name.pid_str, to_term arg_names t1.term_desc, to_term arg_names t2.term_desc)
+    TLet (name.pid_str,
+          to_term arg_names t1.term_desc,
+          to_term arg_names t2.term_desc)
   (*
   | Tidapp of qualid * term list
   | Tnot of term
   | Tif of term * term * term
   | Tquant of quant * binder list * term
   | Tattr of string * term
-  | Tlet of Preid.t * term * term
   | Tcase of term * (pattern * term) list
   | Tcast of term * pty
   | Ttuple of term list
@@ -178,10 +176,10 @@ let rec to_term (arg_names : string list) = function
   | _ -> assert false
 and to_term_list arg_names t =
   match t with
-  | Gospel.Uast.Ttuple terms ->
-    (match terms with
+  | Gospel.Uast.Ttuple terms -> (match terms with
     | [] -> []
-    | hd :: tl -> to_term arg_names hd.term_desc :: to_term_list arg_names (Ttuple tl))
+    | hd :: tl ->
+      to_term arg_names hd.term_desc :: to_term_list arg_names (Ttuple tl))
   | _ -> assert false
 and to_fun arg_names t : term list =
   (match t.Gospel.Uast.term_desc with

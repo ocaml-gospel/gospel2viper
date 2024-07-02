@@ -4,7 +4,22 @@ open Viper_ast
 type type_storage =
   {mutable fields: string list; mutable models: (string * ty) list}
 
-  let ty_ht = Hashtbl.create 8
+let rec pp_ty ty =
+  match ty with
+  | TyApp (s, tys) ->
+    Format.printf "%s" s;
+    if tys <> [] then Format.printf "["; List.iter (fun e -> pp_ty e) tys; Format.printf "]"
+  | TyVar s -> Format.printf "%s" s
+
+let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
+  Printf.printf "%s -> \n" x; Format.printf "\tfields:: ";
+  List.iter (fun field -> Format.printf "%s " field) y.fields;
+  Format.printf "\n\tmodels::";
+  List.iter (fun (m, ty)-> Format.printf "(%s: " m; pp_ty ty; Format.printf ")") y.models;
+  Format.printf "@.") ty_ht
+
+let ty_ht = Hashtbl.create 8
+let funs_l: string list ref = ref ["contains_once"; "lseg"] (* tests values *)
 
 let rec flat_list l =
   match l with
@@ -75,10 +90,8 @@ let qualid_to_string = function
 
 let rec get_ty_lbl pty =
   match pty with
-  | Uast.PTtyapp (Qpreid preid, []) ->
-    keyword preid.pid_str
-  | Uast.PTtyapp (_qualid, hd :: _tl) ->
-    get_ty_lbl hd
+  | Uast.PTtyapp (Qpreid preid, []) -> keyword preid.pid_str
+  | Uast.PTtyapp (_qualid, hd :: _tl) -> get_ty_lbl hd
   (*
   | PTtyvar of Preid.t
   | PTtuple of pty list
@@ -126,7 +139,8 @@ let to_const = function
 let to_binop = function
   | Uast.Tand | Tand_asym -> BAnd
   | Tor | Tor_asym -> BOr
-  | Timplies | Tiff -> assert false
+  | Timplies -> BImpl
+  | Tiff -> assert false
 
 let rec to_term (arg_names : string list) = function
   | Gospel.Uast.Ttrue -> TBool true
@@ -140,14 +154,30 @@ let rec to_term (arg_names : string list) = function
     (to_term arg_names t1.term_desc,
     keyword infix.pid_str,
     to_term arg_names t2.term_desc)
-  | Tpreid x -> let var_name = qualid_to_string x in
-    if List.mem var_name arg_names then TVar (None, var_name)
-    else TVar (Some (List.hd arg_names), var_name)
-  | Tfield (_term, qualid) -> TVar (None, qualid_to_string qualid)
+  | Tpreid x -> TVar (None, qualid_to_string x)
+  | Tfield (term, qualid) ->
+    let arg = qualid_to_string qualid in
+    TVar ((if List.mem arg arg_names then None else
+      Some (to_term arg_names term.term_desc)), arg)
+  | Tapply (hd, term) ->
+    let argv = to_fun arg_names hd @ to_fun arg_names term in
+    let args = List.tl argv in
+    let fun_name =
+      (match List.hd argv with
+      | TVar (_, s) -> s
+      | _ -> assert false) in
+    if List.mem fun_name !funs_l then TApp(None, fun_name, args)
+    else (match fun_name with
+      | "length" -> TSeq (TLength (List.hd args))
+      | "get"    ->
+        (match args with
+        | [n; num] -> TSeq (TGet (n, num))
+        | _ -> assert false)
+      | _ -> assert false)
+  | Tlet (name, t1, t2) ->
+    TLet (name.pid_str, to_term arg_names t1.term_desc, to_term arg_names t2.term_desc)
   (*
   | Tidapp of qualid * term list
-  | Tfield of term * qualid
-  | Tapply of term * term
   | Tnot of term
   | Tif of term * term * term
   | Tquant of quant * binder list * term
@@ -162,6 +192,18 @@ let rec to_term (arg_names : string list) = function
   | Told of term
   *)
   | _ -> assert false
+and to_term_list arg_names t =
+  match t with
+  | Gospel.Uast.Ttuple terms ->
+    (match terms with
+    | [] -> []
+    | hd :: tl -> to_term arg_names hd.term_desc :: to_term_list arg_names (Ttuple tl))
+  | _ -> assert false
+and to_fun arg_names t : term list =
+  (match t.Gospel.Uast.term_desc with
+  | Gospel.Uast.Tpreid _ as tpreid -> [to_term arg_names tpreid]
+  | Tapply (hd2, t2) -> to_fun arg_names hd2 @ to_fun arg_names t2
+  | _ -> [to_term arg_names t.term_desc])
 
 let to_def fields_to_acc arg_names term_opt =
   match term_opt with
@@ -194,14 +236,12 @@ let struct_desc d =
   match d with
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
     (* For the moment, no "and" in type declaration *)
-    let models =
-      (match ty_decl.tspec with
-      | None -> []
-      | Some spec -> get_spec_fields spec.ty_field) in
+    let models = (match ty_decl.tspec with
+    | None -> []
+    | Some spec -> get_spec_fields spec.ty_field) in
     Hashtbl.add ty_ht ty_decl.tname.txt {fields = []; models = []};
     let fields, r = to_type_def ty_decl in
     Hashtbl.replace ty_ht ty_decl.tname.txt {fields; models}; r
-    (* pp_hashtbl ty_ht; r *)
   | Str_function f ->
     let args = to_args f.fun_params in
     let arg_names = List.map (fun (n, _t) -> n) args in

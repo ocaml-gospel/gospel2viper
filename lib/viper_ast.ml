@@ -1,4 +1,4 @@
-type binop = BAnd | BOr
+type binop = BAnd | BOr | BImpl
 
 type ty =
   | TyApp of string * (ty list)
@@ -7,20 +7,20 @@ and term =
   | TConst of int
   | TBool of bool
   | TApp of ty option * string * term list
-  | TVar of string option * string
+  | TVar of term option * string
   | TInfix of term * string * term
   | TSeq of tseq
   | TBinop of term * binop * term
   | TNot of term
-  | TField of term * term
   | TAcc of string * string
+  | TLet of string * term * term
 and tseq =
   | TEmpty of ty
   | TSingleton of term
   | TConcat of term * term
   | TLength of term
-  | TGet of term * term (* TGet seq_name pos *)
-  | TSub of term * term * term option (* TSub seq_name start_pos end_pos *)
+  | TGet of term * term
+  | TSub of term * term * term option
 
 type spec = {
   spec_pre:  term list;

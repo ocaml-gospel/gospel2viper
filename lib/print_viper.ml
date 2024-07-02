@@ -17,6 +17,10 @@ let colonspace = string ": "
 let spaceconcatspace = string " ++ "
 let dotdot = string ".."
 let dot = string "."
+let implies = string "==>" ^^ break 1
+let crlet = hardline ^^ string "let "
+let spaceeqspace = string " == "
+let spaceinspace = string " in "
 let not = string "!"
 let spaceandandspace = string " && "
 let reqspace = string "requires "
@@ -42,8 +46,9 @@ let rec pp_list pp_elem = function
   | elem :: tl -> pp_elem elem ^^ commaspace ^^ pp_list pp_elem tl
 
 let pp_op = function
-  | BAnd -> string "&&"
-  | BOr  -> string "||"
+  | BAnd  -> string "&&"
+  | BOr   -> string "||"
+  | BImpl -> string "==>"
 
 let rec pp_ty = function
   | TyApp (s, tys) ->
@@ -57,14 +62,15 @@ and pp_term = function
   | TVar (prefix, s) ->
     (match prefix with
     | None -> empty
-    | Some n -> string n ^^ dot) ^^ string s
+    | Some n -> pp_term n ^^ dot) ^^ string s
   | TInfix (term1, symb, term2) ->
     parens (pp_term term1 ^^ space ^^ string symb ^^ space ^^ pp_term term2)
   | TSeq seq -> pp_tseq seq
   | TBinop (t1, symb, t2) -> parens (pp_term t1 ^^ space ^^ pp_op symb ^^ space ^^ pp_term t2)
   | TNot term -> not ^^ pp_term term
-  | TField (ref, field) -> pp_term ref ^^ dot ^^ pp_term field
   | TAcc (model, field) -> acc ^^ parens (string model ^^ dot ^^ string field)
+  | TLet (name, t1, t2) ->
+    crlet ^^ string name ^^ spaceeqspace ^^ parens (pp_term t1) ^^ spaceinspace ^^ pp_term t2
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)

@@ -4,22 +4,7 @@ open Viper_ast
 type type_storage =
   {mutable fields: string list; mutable models: (string * ty) list}
 
-let rec pp_ty ty =
-  match ty with
-  | TyApp (s, tys) ->
-    Format.printf "%s" s;
-    if tys <> [] then Format.printf "["; List.iter (fun e -> pp_ty e) tys; Format.printf "]"
-  | TyVar s -> Format.printf "%s" s
-
-let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
-  Printf.printf "%s -> \n" x; Format.printf "\tfields:: ";
-  List.iter (fun field -> Format.printf "%s " field) y.fields;
-  Format.printf "\n\tmodels::";
-  List.iter (fun (m, ty)-> Format.printf "(%s: " m; pp_ty ty; Format.printf ")") y.models;
-  Format.printf "@.") ty_ht
-
 let ty_ht = Hashtbl.create 8
-let funs_l: string list ref = ref ["contains_once"; "lseg"] (* tests values *)
 
 let rec flat_list l =
   match l with
@@ -113,13 +98,11 @@ let rec to_args fl =
   match fl with
   | [] -> []
   | (_loc, preid, pty) :: tl ->
+    let ty = to_ty pty in
     let str = get_ty_lbl pty in
-    (match Hashtbl.find_opt ty_ht str with
-    | None ->
-      (preid.Identifier.Preid.pid_str, TyApp (str, [])) :: to_args tl
-    | Some l ->
-      ((preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) ::
-      l.models) @ to_args tl)
+    if Hashtbl.mem ty_ht str
+    then (preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) :: to_args tl
+    else (preid.Identifier.Preid.pid_str, ty) :: to_args tl
 
 let rec get_spec_fields (spec: Gospel.Uast.field list) : (string * ty) list =
   match spec with
@@ -166,14 +149,15 @@ let rec to_term (arg_names : string list) = function
       (match List.hd argv with
       | TVar (_, s) -> s
       | _ -> assert false) in
-    if List.mem fun_name !funs_l then TApp(None, fun_name, args)
-    else (match fun_name with
+    (match fun_name with
       | "length" -> TSeq (TLength (List.hd args))
       | "get"    ->
         (match args with
         | [n; num] -> TSeq (TGet (n, num))
         | _ -> assert false)
-      | _ -> assert false)
+      | "tl"     -> TSeq(TSub (List.hd args, (TConst 1), None))
+      | "hd"     -> TSeq(TGet (List.hd args, (TConst 0)))
+      | default -> TApp(None, default, args))
   | Tlet (name, t1, t2) ->
     TLet (name.pid_str, to_term arg_names t1.term_desc, to_term arg_names t2.term_desc)
   (*

@@ -13,6 +13,7 @@ let rec flat_list l =
 
 let keyword = function
   | "int" -> "Int"
+  | "bool" -> "Bool"
   | "sequence" -> "Seq"
   | "infix +"  -> "+"
   | "infix -"  -> "-"
@@ -228,11 +229,23 @@ let struct_desc d =
     let args = to_args f.fun_params in
     let arg_names = List.map (fun (n, _t) -> n) args in
     let fields_to_acc = scan_args f.fun_params in
-    [DPredicate {
-      pred_name = f.fun_name.pid_str;
-      pred_body = to_def fields_to_acc arg_names f.fun_def;
-      pred_args = args;
-    }]
+    (match f.fun_type with
+    | None ->
+      [DPredicate {
+        pred_name = f.fun_name.pid_str;
+        pred_body = to_def fields_to_acc arg_names f.fun_def;
+        pred_args = args;
+      }]
+    | Some ret_ty -> [DFunction {
+        function_name = f.fun_name.pid_str;
+        function_args = args;
+        function_rety = to_ty ret_ty;
+        function_spec = {
+          spec_pre  = [];
+          spec_post = [];
+        };
+        function_body = None;
+    }])
   (*
   | Str_eval of s_expression * attributes
   | Str_value of rec_flag * s_value_binding list

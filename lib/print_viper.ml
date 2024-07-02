@@ -26,6 +26,7 @@ let spaceandandspace = string " && "
 let reqspace = string "requires "
 let ensspace = string "ensures "
 let methspace = string "method "
+let funspace = string "function "
 let predspace = string "predicate "
 let acc = string "acc"
 let spacereturnsspace = break 1 ^^ string "returns "
@@ -120,9 +121,13 @@ let pp_body = function
 let pp_predicate_def p =
   predspace ^^ string p.pred_name ^^ pp_args p.pred_args ^^ pp_body p.pred_body
 
+let pp_function_def f =
+  funspace ^^ string f.function_name ^^ pp_args f.function_args ^^ colonspace ^^ pp_ty f.function_rety ^^ pp_spec f.function_spec ^^ pp_body f.function_body
+
 let pp_decl = function
   | DPredicate pred_def -> pp_predicate_def pred_def
   | DMethod method_def  -> pp_method_def method_def
+  | DFunction function_def -> pp_function_def function_def
   | DField (name, ty) ->
       string "field" ^^ space ^^ string name ^^ colonspace ^^ pp_ty ty
   | DBlank -> empty

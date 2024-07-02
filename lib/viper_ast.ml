@@ -40,9 +40,18 @@ type method_def = {
   method_spec: spec;
 }
 
+type function_def = {
+  function_name: string;
+  function_args: (string * ty) list;
+  function_rety: ty;
+  function_spec: spec;
+  function_body: term option;
+}
+
 type decl =
   | DPredicate of predicate_def
   | DMethod of method_def
+  | DFunction of function_def
   | DField of string * ty
   | DBlank
 

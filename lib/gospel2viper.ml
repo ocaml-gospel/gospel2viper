@@ -137,7 +137,10 @@ let rec to_term (arg_names : string list) = function
     to_term arg_names t1.term_desc,
     keyword infix.pid_str,
     to_term arg_names t2.term_desc)
-  | Tpreid x -> TVar (None, qualid_to_string x)
+  | Tpreid x ->
+    (match qualid_to_string x with
+    | "empty" -> TSeq (TEmpty (TyVar "Int"))
+    | default -> TVar (None, default))
   | Tfield (term, qualid) ->
     let arg = qualid_to_string qualid in
     TVar ((if List.mem arg arg_names then None
@@ -153,17 +156,24 @@ let rec to_term (arg_names : string list) = function
       | [n; num] -> TSeq (TGet (n, num))
       | _ -> assert false)
     | "length" -> TSeq (TLength (List.hd args))
-    | "tl"     -> TSeq(TSub (List.hd args, (TConst 1), None))
-    | "hd"     -> TSeq(TGet (List.hd args, (TConst 0)))
-    | default  -> TApp(None, default, args))
+    | "tl"     -> TSeq (TSub (List.hd args, (TConst 1), None))
+    | "hd"     -> TSeq (TGet (List.hd args, (TConst 0)))
+    | default  -> TApp (None, default, args))
   | Tlet (name, t1, t2) ->
     TLet (name.pid_str,
           to_term arg_names t1.term_desc,
           to_term arg_names t2.term_desc)
+  | Tif (tif, tthen, telse) -> TTernary (
+    to_term arg_names tif.term_desc,
+    to_term arg_names tthen.term_desc,
+    to_term arg_names telse.term_desc)
+  | Tidapp (qualid, terms) ->
+    (match terms with
+    | [t1; t2] -> TInfix (to_term arg_names t1.term_desc, keyword (qualid_to_string qualid), to_term arg_names t2.term_desc)
+    | _ -> assert false)
   (*
   | Tidapp of qualid * term list
   | Tnot of term
-  | Tif of term * term * term
   | Tquant of quant * binder list * term
   | Tattr of string * term
   | Tcase of term * (pattern * term) list
@@ -201,6 +211,11 @@ let to_def fields_to_acc arg_names term_opt =
       (iter fields_to_acc,
       BAnd,
       to_term arg_names term.Gospel.Uast.term_desc))
+
+let to_fun_body arg_names term_opt : term option =
+  match term_opt with
+  | None -> None
+  | Some term -> Some (to_term arg_names term.Uast.term_desc)
 
 let rec scan_args fl =
   match fl with
@@ -244,7 +259,7 @@ let struct_desc d =
           spec_pre  = [];
           spec_post = [];
         };
-        function_body = None;
+        function_body = to_fun_body arg_names f.fun_def;
     }])
   (*
   | Str_eval of s_expression * attributes

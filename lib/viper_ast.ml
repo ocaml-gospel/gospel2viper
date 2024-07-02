@@ -14,6 +14,8 @@ and term =
   | TNot of term
   | TAcc of string * string
   | TLet of string * term * term
+  | TIf of term * term * term option
+  | TTernary of term * term * term
 and tseq =
   | TEmpty of ty
   | TSingleton of term

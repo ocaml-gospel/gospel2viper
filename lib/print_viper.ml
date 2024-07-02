@@ -18,9 +18,13 @@ let spaceconcatspace = string " ++ "
 let dotdot = string ".."
 let dot = string "."
 let implies = string "==>" ^^ break 1
-let crlet = hardline ^^ string "let "
+let crlet = string "let "
 let spaceeqspace = string " == "
 let spaceinspace = string " in "
+let ifspace = string "if "
+let spaceelsespace = string " else "
+let spaceintmarkspace = string " ? "
+let spacecolonspace = string " : "
 let not = string "!"
 let spaceandandspace = string " && "
 let reqspace = string "requires "
@@ -72,6 +76,11 @@ and pp_term = function
   | TAcc (model, field) -> acc ^^ parens (string model ^^ dot ^^ string field)
   | TLet (name, t1, t2) ->
     crlet ^^ string name ^^ spaceeqspace ^^ parens (pp_term t1) ^^ spaceinspace ^^ pp_term t2
+  | TIf (tif, tthen, telse_opt) -> ifspace ^^ parens (pp_term tif) ^^ space ^^ braces (pp_term tthen) ^^
+    (match telse_opt with
+    | None -> empty
+    | Some telse -> spaceelsespace ^^ braces (pp_term telse))
+  | TTernary (tif, tthen, telse) -> pp_term tif ^^ spaceintmarkspace ^^ pp_term tthen ^^ spacecolonspace ^^ pp_term telse
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)
@@ -119,10 +128,10 @@ let pp_body = function
   | Some t -> braces (pp_term t)
 
 let pp_predicate_def p =
-  predspace ^^ string p.pred_name ^^ pp_args p.pred_args ^^ pp_body p.pred_body
+  predspace ^^ string p.pred_name ^^ pp_args p.pred_args ^^ space ^^ pp_body p.pred_body
 
 let pp_function_def f =
-  funspace ^^ string f.function_name ^^ pp_args f.function_args ^^ colonspace ^^ pp_ty f.function_rety ^^ pp_spec f.function_spec ^^ pp_body f.function_body
+  funspace ^^ string f.function_name ^^ pp_args f.function_args ^^ colonspace ^^ pp_ty f.function_rety ^^ pp_spec f.function_spec ^^ space ^^ pp_body f.function_body
 
 let pp_decl = function
   | DPredicate pred_def -> pp_predicate_def pred_def

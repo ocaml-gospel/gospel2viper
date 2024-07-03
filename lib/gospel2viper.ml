@@ -12,7 +12,7 @@ let rec flat_list l =
   | hd :: tl -> hd @ flat_list tl
 
 let keyword = function
-  | "int" -> "Int"
+  | "int"  -> "Int"
   | "bool" -> "Bool"
   | "sequence" -> "Seq"
   | "infix +"  -> "+"
@@ -31,11 +31,11 @@ let to_type t =
   match t.Parsetree.ptyp_desc with
   | Ptyp_constr (lident, []) ->
     (match lident.txt with
-    | Lident s ->
-      if Hashtbl.mem ty_ht s then TyApp("Ref", [])
+    | Lident s -> if Hashtbl.mem ty_ht s
+      then TyApp("Ref", [])
       else TyApp (keyword s, [])
     | _ -> assert false)
-  | Ptyp_constr (_lident, _l) -> assert false
+  | Ptyp_constr _ -> assert false
   (*
   | Ptyp_any  (** [_] *)
   | Ptyp_var of string  (** A type variable such as ['a] *)
@@ -70,14 +70,14 @@ let to_type_def decl =
   *)
   | _ -> assert false
 
-let qualid_to_string = function
+let to_string = function
   | Uast.Qpreid s -> s.pid_str
   | Qdot _ -> assert false
 
 let rec get_ty_lbl pty =
   match pty with
   | Uast.PTtyapp (Qpreid preid, []) -> keyword preid.pid_str
-  | Uast.PTtyapp (_qualid, hd :: _tl) -> get_ty_lbl hd
+  | Uast.PTtyapp (_name, hd :: _tl) -> get_ty_lbl hd
   (*
   | PTtyvar of Preid.t
   | PTtuple of pty list
@@ -85,10 +85,10 @@ let rec get_ty_lbl pty =
   *)
   | _ -> assert false
 
-let rec to_ty (ty: Uast.pty) : ty =
+let rec to_ty ty =
   match ty with
-  | PTtyapp (qualid, tys) ->
-    TyApp (keyword (qualid_to_string qualid), to_ty_list tys)
+  | Uast.PTtyapp (name, tys) ->
+    TyApp (keyword (to_string name), to_ty_list tys)
   | _ -> assert false
 and to_ty_list = function
   | [] -> []
@@ -100,9 +100,9 @@ let rec to_args fl =
   | (_loc, preid, pty) :: tl ->
     let ty = to_ty pty in
     let str = get_ty_lbl pty in
-    if Hashtbl.mem ty_ht str
-    then (preid.Identifier.Preid.pid_str, TyApp ("Ref", [])) :: to_args tl
-    else (preid.Identifier.Preid.pid_str, ty) :: to_args tl
+    (if Hashtbl.mem ty_ht str
+    then (preid.Identifier.Preid.pid_str, TyApp ("Ref", []))
+    else (preid.Identifier.Preid.pid_str, ty) ) :: to_args tl
 
 let rec get_spec_fields spec =
   match spec with
@@ -125,28 +125,23 @@ let to_binop = function
   | Timplies -> BImpl
   | Tiff -> assert false
 
-let rec to_term (arg_names : string list) = function
-  | Gospel.Uast.Ttrue -> TBool true
+let rec to_term term =
+  match term.Gospel.Uast.term_desc with
+  | Ttrue  -> TBool true
   | Tfalse -> TBool false
   | Tconst c -> to_const c
-  | Tbinop (t1, binop, t2) -> TBinop (
-    to_term arg_names t1.term_desc,
-    to_binop binop,
-    to_term arg_names t2.term_desc)
-  | Tinfix (t1, infix, t2) -> TInfix (
-    to_term arg_names t1.term_desc,
-    keyword infix.pid_str,
-    to_term arg_names t2.term_desc)
-  | Tpreid x ->
-    (match qualid_to_string x with
+  | Tbinop (t1, binop, t2) ->
+    TBinop (to_term t1, to_binop binop, to_term t2)
+  | Tinfix (t1, infix, t2) ->
+    TInfix (to_term t1, keyword infix.pid_str, to_term t2)
+  | Tpreid name ->
+    (match to_string name with
     | "empty" -> TSeq (TEmpty (TyVar "Int"))
     | default -> TVar (None, default))
-  | Tfield (term, qualid) ->
-    let arg = qualid_to_string qualid in
-    TVar ((if List.mem arg arg_names then None
-    else Some (to_term arg_names term.term_desc)), arg)
+  | Tfield (term, field) ->
+    TVar (Some (to_term term), to_string field)
   | Tapply (hd, term) ->
-    let argv = to_fun arg_names hd @ to_fun arg_names term in
+    let argv = to_fun hd @ to_fun term in
     let args = List.tl argv in
     let fun_name = (match List.hd argv with
     | TVar (_, s) -> s
@@ -160,16 +155,13 @@ let rec to_term (arg_names : string list) = function
     | "hd"     -> TSeq (TGet (List.hd args, (TConst 0)))
     | default  -> TApp (None, default, args))
   | Tlet (name, t1, t2) ->
-    TLet (name.pid_str,
-          to_term arg_names t1.term_desc,
-          to_term arg_names t2.term_desc)
-  | Tif (tif, tthen, telse) -> TTernary (
-    to_term arg_names tif.term_desc,
-    to_term arg_names tthen.term_desc,
-    to_term arg_names telse.term_desc)
-  | Tidapp (qualid, terms) ->
+    TLet (name.pid_str, to_term t1, to_term t2)
+  | Tif (tif, tthen, telse) ->
+    TTernary (to_term tif, to_term tthen, to_term telse)
+  | Tidapp (name, terms) ->
     (match terms with
-    | [t1; t2] -> TInfix (to_term arg_names t1.term_desc, keyword (qualid_to_string qualid), to_term arg_names t2.term_desc)
+    | [t1; t2] ->
+      TInfix (to_term t1, keyword (to_string name), to_term t2)
     | _ -> assert false)
   (*
   | Tidapp of qualid * term list
@@ -185,20 +177,19 @@ let rec to_term (arg_names : string list) = function
   | Told of term
   *)
   | _ -> assert false
-and to_term_list arg_names t =
+and to_term_list t =
   match t with
   | Gospel.Uast.Ttuple terms -> (match terms with
     | [] -> []
-    | hd :: tl ->
-      to_term arg_names hd.term_desc :: to_term_list arg_names (Ttuple tl))
+    | hd :: tl -> to_term hd :: to_term_list (Ttuple tl))
   | _ -> assert false
-and to_fun arg_names t : term list =
+and to_fun t : term list =
   (match t.Gospel.Uast.term_desc with
-  | Gospel.Uast.Tpreid _ as tpreid -> [to_term arg_names tpreid]
-  | Tapply (hd2, t2) -> to_fun arg_names hd2 @ to_fun arg_names t2
-  | _ -> [to_term arg_names t.term_desc])
+  | Gospel.Uast.Tpreid _ -> [to_term t]
+  | Tapply (hd2, t2) -> to_fun hd2 @ to_fun t2
+  | _ -> [to_term t])
 
-let to_def fields_to_acc arg_names term_opt =
+let to_def fields_to_acc term_opt =
   match term_opt with
   | None -> None
   | Some term ->
@@ -207,22 +198,18 @@ let to_def fields_to_acc arg_names term_opt =
     | [(type_name, field)] -> TAcc (type_name, field)
     | (type_name, field) :: tl -> TBinop
       (TAcc(type_name, field), BAnd, iter tl) in
-      Some (TBinop
-      (iter fields_to_acc,
-      BAnd,
-      to_term arg_names term.Gospel.Uast.term_desc))
+      Some (TBinop (iter fields_to_acc, BAnd, to_term term))
 
-let to_fun_body arg_names term_opt : term option =
+let to_fun_body term_opt : term option =
   match term_opt with
   | None -> None
-  | Some term -> Some (to_term arg_names term.Uast.term_desc)
+  | Some term -> Some (to_term term)
 
 let rec scan_args fl =
   match fl with
   | [] -> []
   | (_loc, preid, pty) :: tl ->
-    let ty_str = get_ty_lbl pty in
-    (match Hashtbl.find_opt ty_ht ty_str with
+    (match Hashtbl.find_opt ty_ht (get_ty_lbl pty) with
     | None   -> []
     | Some l ->
       let rec iter = function
@@ -230,16 +217,12 @@ let rec scan_args fl =
       | n :: tl -> (preid.Identifier.Preid.pid_str, n) :: iter tl in
       iter l.fields) @ scan_args tl
 
-let to_spec arg_names (spec_opt : Gospel.Uast.fun_spec option): spec =
+let to_spec (spec_opt : Gospel.Uast.fun_spec option): spec =
   match spec_opt with
-  | None -> { spec_pre  = []; spec_post = []; }
+  | None -> {spec_pre = []; spec_post = [];}
   | Some spec ->
-    let spec_pre = List.map (fun t ->
-      to_term arg_names t.Uast.term_desc) spec.fun_req in
-    let spec_post = List.map (fun t ->
-      to_term arg_names t.Uast.term_desc) spec.fun_ens in
-    {spec_pre; spec_post}
-
+    {spec_pre = List.map (fun t -> to_term t) spec.fun_req;
+    spec_post = List.map (fun t -> to_term t) spec.fun_ens}
 let struct_desc d =
   match d with
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
@@ -252,22 +235,22 @@ let struct_desc d =
     Hashtbl.replace ty_ht ty_decl.tname.txt {fields; models}; r
   | Str_function f ->
     let args = to_args f.fun_params in
-    let arg_names = List.map (fun (n, _t) -> n) args in
     let fields_to_acc = scan_args f.fun_params in
     (match f.fun_type with
     | None ->
       [DPredicate {
         pred_name = f.fun_name.pid_str;
-        pred_body = to_def fields_to_acc arg_names f.fun_def;
+        pred_body = to_def fields_to_acc f.fun_def;
         pred_args = args;
       }]
     | Some ret_ty -> [DFunction {
         function_name = f.fun_name.pid_str;
         function_args = args;
         function_rety = to_ty ret_ty;
-        function_spec = to_spec arg_names f.fun_spec;
-        function_body = to_fun_body arg_names f.fun_def;
+        function_spec = to_spec f.fun_spec;
+        function_body = to_fun_body f.fun_def;
     }])
+    | Str_value (_rec_f, _bindings) -> assert false
   (*
   | Str_eval of s_expression * attributes
   | Str_value of rec_flag * s_value_binding list
@@ -283,7 +266,6 @@ let struct_desc d =
   | Str_include of include_declaration
   | Str_attribute of attribute
   | Str_extension of extension * attributes
-  | Str_function of function_
   | Str_prop of prop
   | Str_ghost_type of rec_flag * s_type_declaration list
   | Str_ghost_val of s_val_description

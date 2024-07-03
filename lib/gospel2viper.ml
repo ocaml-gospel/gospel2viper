@@ -6,10 +6,10 @@ type type_storage =
 
 let ty_ht = Hashtbl.create 8
 
-let rec flat_list l =
-  match l with
-  | [] -> []
-  | hd :: tl -> hd @ flat_list tl
+(* let rec flat_list l = *)
+(*   match l with *)
+(*   | [] -> [] *)
+(*   | hd :: tl -> hd @ flat_list tl *)
 
 let keyword = function
   | "int"  -> "Int"
@@ -182,13 +182,29 @@ let rec to_term term =
   | Tscope of qualid * term
   | Told of term
   *)
-  | _ -> assert false
-and to_term_list t =
-  match t with
-  | Gospel.Uast.Ttuple terms -> (match terms with
-    | [] -> []
-    | hd :: tl -> to_term hd :: to_term_list (Ttuple tl))
-  | _ -> assert false
+  | Tpoints (Qpreid id, fields) ->
+    let mk_acc (field, _) = match field with
+      | Uast.Qdot _ -> assert false (* TODO *)
+      | Qpreid field ->
+        Identifier.Preid.(TAcc (id.pid_str, field.pid_str)) in
+    let mk_and = function
+      | [] -> assert false
+      | field :: xs ->
+        List.fold_left (fun acc f -> TBinop (acc, BAnd, f)) field xs in
+    let fields_acc = List.map mk_acc fields in
+    mk_and fields_acc
+  | Tpoints (Qdot _, _) ->
+    assert false (* TODO *)
+  | Tnot _ -> assert false (* TODO *)
+  | Tquant _ -> assert false (* TODO *)
+  | _ -> assert false (* TODO *)
+(* and to_term_list t = *)
+(*   match t with *)
+(*   | Gospel.Uast.Ttuple terms -> (match terms with *)
+(*     | [] -> [] *)
+(*     | hd :: tl -> to_term hd :: to_term_list (Ttuple tl)) *)
+(*   | _ -> assert false *)
+
 and to_fun t : term list =
   (match t.Gospel.Uast.term_desc with
   | Gospel.Uast.Tpreid _ -> [to_term t]
@@ -221,8 +237,8 @@ let to_spec (spec_opt : Gospel.Uast.fun_spec option): spec =
   match spec_opt with
   | None -> {spec_pre = []; spec_post = [];}
   | Some spec ->
-    {spec_pre = List.map (fun t -> to_term t) spec.fun_req;
-    spec_post = List.map (fun t -> to_term t) spec.fun_ens}
+    {spec_pre = List.map to_term spec.fun_req;
+    spec_post = List.map to_term spec.fun_ens}
 let struct_desc d =
   match d with
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
@@ -275,4 +291,4 @@ let struct_desc d =
 let cameleer_structure_item i = struct_desc i.Uast.sstr_desc
 
 let cameleer_structure (s: Uast.s_structure) =
-  flat_list (List.map (fun item -> cameleer_structure_item item) s)
+  List.flatten (List.map (fun item -> cameleer_structure_item item) s)

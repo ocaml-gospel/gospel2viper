@@ -176,7 +176,8 @@ let rec to_term term =
   | Tscope of qualid * term
   | Told of term
   *)
-  | _ -> assert false
+  | Tpoints _ -> assert false (* TODO *)
+  (* | _ -> assert false *)
 and to_term_list t =
   match t with
   | Gospel.Uast.Ttuple terms -> (match terms with

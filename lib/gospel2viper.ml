@@ -163,12 +163,6 @@ let rec to_term term =
     | [t1; t2] ->
       TInfix (to_term t1, keyword (to_string name), to_term t2)
     | _ -> assert false)
-  | Tpoints (name, l) ->
-    let rec iter = function
-    | [(field, _term)] -> TAcc (to_string name, to_string field)
-    | (field, _term) :: tl ->
-      TBinop (TAcc (to_string name, to_string field), BAnd, iter tl)
-    | _ -> assert false (* gospel syntax error *) in iter l
   (*
   | Tidapp of qualid * term list
   | Tnot of term
@@ -194,7 +188,7 @@ let rec to_term term =
     let fields_acc = List.map mk_acc fields in
     mk_and fields_acc
   | Tpoints (Qdot _, _) ->
-    assert false (* TODO *)
+      assert false (* TODO *)
   | Tnot _ -> assert false (* TODO *)
   | Tquant _ -> assert false (* TODO *)
   | _ -> assert false (* TODO *)

@@ -163,6 +163,12 @@ let rec to_term term =
     | [t1; t2] ->
       TInfix (to_term t1, keyword (to_string name), to_term t2)
     | _ -> assert false)
+  | Tpoints (name, l) ->
+    let rec iter = function
+    | [(field, _term)] -> TAcc (to_string name, to_string field)
+    | (field, _term) :: tl ->
+      TBinop (TAcc (to_string name, to_string field), BAnd, iter tl)
+    | _ -> assert false (* gospel syntax error *) in iter l
   (*
   | Tidapp of qualid * term list
   | Tnot of term
@@ -176,8 +182,7 @@ let rec to_term term =
   | Tscope of qualid * term
   | Told of term
   *)
-  | Tpoints _ -> assert false (* TODO *)
-  (* | _ -> assert false *)
+  | _ -> assert false
 and to_term_list t =
   match t with
   | Gospel.Uast.Ttuple terms -> (match terms with
@@ -190,16 +195,10 @@ and to_fun t : term list =
   | Tapply (hd2, t2) -> to_fun hd2 @ to_fun t2
   | _ -> [to_term t])
 
-let to_def fields_to_acc term_opt =
+let to_def term_opt =
   match term_opt with
   | None -> None
-  | Some term ->
-    let rec iter = function
-    | [] -> assert false
-    | [(type_name, field)] -> TAcc (type_name, field)
-    | (type_name, field) :: tl -> TBinop
-      (TAcc(type_name, field), BAnd, iter tl) in
-      Some (TBinop (iter fields_to_acc, BAnd, to_term term))
+  | Some term -> Some (to_term term)
 
 let to_fun_body term_opt : term option =
   match term_opt with
@@ -236,12 +235,11 @@ let struct_desc d =
     Hashtbl.replace ty_ht ty_decl.tname.txt {fields; models}; r
   | Str_function f ->
     let args = to_args f.fun_params in
-    let fields_to_acc = scan_args f.fun_params in
     (match f.fun_type with
     | None ->
       [DPredicate {
         pred_name = f.fun_name.pid_str;
-        pred_body = to_def fields_to_acc f.fun_def;
+        pred_body = to_def f.fun_def;
         pred_args = args;
       }]
     | Some ret_ty -> [DFunction {

@@ -185,7 +185,7 @@ let rec to_term term =
       | [] -> assert false
       | field :: xs ->
         List.fold_left (fun acc f -> TBinop (acc, BAnd, f)) field xs in
-    let fields_acc = List.map mk_acc fields in
+    let fields_acc = List.rev (List.map mk_acc fields) in
     mk_and fields_acc
   | Tpoints (Qdot _, _) ->
       assert false (* TODO *)

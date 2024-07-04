@@ -54,13 +54,11 @@ let () =
   let ocaml = Uattr2spec.structure ~filename:fname ocaml_structure in
   let file_viper = Gospel2viper.cameleer_structure ocaml in
   let out_fname = base_fname fname ^ "_ml.vpr" in
-  let base_dir =
-    "/home/cha/Documents/github/gospel2viper/example/translation_ml_"
-    ^ (String.capitalize_ascii (base_fname fname)) in
-  let () = if not (Sys.file_exists base_dir) then
-    Sys.mkdir base_dir 0o755 else () in
-  let directory = base_dir ^ "/" ^ out_fname in
-
-  let fmt = formatter_of_out_channel (open_out directory) in
+  (* let base_dir = *)
+  (*   "/home/cha/Documents/github/gospel2viper/example/translation_ml_" *)
+  (*   ^ (String.capitalize_ascii (base_fname fname)) in *)
+  (* let () = if not (Sys.file_exists base_dir) then *)
+  (*   Sys.mkdir base_dir 0o755 else () in *)
+  (* let directory = base_dir ^ "/" ^ out_fname in *)
+  let fmt = formatter_of_out_channel (open_out out_fname) in
   fprintf fmt "%s@." (Print_viper.print file_viper)
-

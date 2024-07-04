@@ -1,5 +1,4 @@
-type t = { mutable value : int;
-           mutable next : t }
+type t = Nil[@viper "null"] | Cons of { mutable value : int; mutable next : t }
 (*@ mutable model view : integer sequence *)
 
 (*@ predicate lseg (from: t) (l: int sequence) (to: t) =
@@ -17,9 +16,11 @@ type queue = {
   mutable last : t
 }
 
-(*@ function take_last (s : int sequence) : int sequence *)
+(*@ function take_last (s : int sequence) : int sequence =
+      s[.. length s - 1] *)
 
-(*@ function end_seq (s : int sequence) : int sequence *)
+(*@ function end_seq (s : int sequence) : int sequence =
+      singleton (get s (length s - 1)) *)
 
 (*@ predicate queue (q: queue) (l: int sequence) =
       q ~~> {length; first; last} &&

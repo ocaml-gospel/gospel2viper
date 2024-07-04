@@ -70,9 +70,9 @@ let to_type_def decl =
   *)
   | _ -> assert false
 
-let to_string = function
+let rec to_string = function
   | Uast.Qpreid s -> s.pid_str
-  | Qdot _ -> assert false
+  | Qdot (qualid, s) -> to_string qualid ^ "." ^ s.pid_str
 
 let rec get_ty_lbl pty =
   match pty with
@@ -136,7 +136,7 @@ let rec to_term term =
     TInfix (to_term t1, keyword infix.pid_str, to_term t2)
   | Tpreid name ->
     (match to_string name with
-    | "empty" -> TSeq (TEmpty (TyVar "Int"))
+    | "empty" | "Sequence.empty" -> TSeq (TEmpty (TyVar "Int"))
     | default -> TVar (None, default))
   | Tfield (term, field) ->
     TVar (Some (to_term term), to_string field)
@@ -147,12 +147,12 @@ let rec to_term term =
     | TVar (_, s) -> s
     | _ -> assert false) in
     (match fun_name with
-    | "get" -> (match args with
+    | "get" | "Sequence.get" -> (match args with
       | [n; num] -> TSeq (TGet (n, num))
       | _ -> assert false)
-    | "length" -> TSeq (TLength (List.hd args))
-    | "tl"     -> TSeq (TSub (List.hd args, (TConst 1), None))
-    | "hd"     -> TSeq (TGet (List.hd args, (TConst 0)))
+    | "length" | "Sequence.length" -> TSeq (TLength (List.hd args))
+    | "tl" | "Sequence.tl"     -> TSeq (TSub (List.hd args, (TConst 1), None))
+    | "hd" | "Sequence.hd"     -> TSeq (TGet (List.hd args, (TConst 0)))
     | default  -> TApp (None, default, args))
   | Tlet (name, t1, t2) ->
     TLet (name.pid_str, to_term t1, to_term t2)

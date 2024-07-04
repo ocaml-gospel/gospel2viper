@@ -25,6 +25,7 @@ let keyword = function
   | "infix <=" -> "<="
   | "infix ="  -> "=="
   | "infix <>" -> "!="
+  | "infix ++" -> "++"
   | default -> default
 
 let to_type t =
@@ -153,13 +154,26 @@ let rec to_term term =
     | "length" | "Sequence.length" -> TSeq (TLength (List.hd args))
     | "tl" | "Sequence.tl"     -> TSeq (TSub (List.hd args, (TConst 1), None))
     | "hd" | "Sequence.hd"     -> TSeq (TGet (List.hd args, (TConst 0)))
+    | "singleton" | "Sequence.singleton" -> TSeq (TSingleton (List.hd args))
     | default  -> TApp (None, default, args))
   | Tlet (name, t1, t2) ->
     TLet (name.pid_str, to_term t1, to_term t2)
   | Tif (tif, tthen, telse) ->
     TTernary (to_term tif, to_term tthen, to_term telse)
   | Tidapp (name, terms) ->
-    (match terms with
+    let str = to_string name in
+    if String.starts_with ~prefix:"mixfix" str then
+      (match str, terms with
+      | "mixfix [_]",    [name; t2] ->
+        TSeq (TGet (to_term name, to_term t2))
+      | "mixfix [_.._]", [name; min; max] ->
+        TSeq (TSub (to_term name, to_term min, Some(to_term max)))
+      | "mixfix [.._]",  [name; max] ->
+        TSeq (TSub (to_term name, TConst 0, Some(to_term max)))
+      | "mixfix [_..]",  [name; min] ->
+        TSeq (TSub (to_term name, to_term min, None))
+      | _ -> assert false)
+    else (match terms with
     | [t1; t2] ->
       TInfix (to_term t1, keyword (to_string name), to_term t2)
     | _ -> assert false)

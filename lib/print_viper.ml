@@ -81,7 +81,7 @@ and pp_term = function
     (match telse_opt with
     | None -> empty
     | Some telse -> spaceelsespace ^^ braces (pp_term telse))
-  | TTernary (tif, tthen, telse) -> pp_term tif ^^ spaceintmarkspace ^^ pp_term tthen ^^ spacecolonspace ^^ pp_term telse
+  | TTernary (tif, tthen, telse) -> parens (pp_term tif ^^ spaceintmarkspace ^^ pp_term tthen ^^ spacecolonspace ^^ pp_term telse)
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)

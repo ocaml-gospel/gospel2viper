@@ -6,6 +6,7 @@ type ty =
 and term =
   | TConst of int
   | TBool of bool
+  | TNull
   | TApp of ty option * string * term list
   | TVar of term option * string
   | TInfix of term * string * term

@@ -1,15 +1,27 @@
 open Gospel
 open Viper_ast
 
-type type_storage =
-  {mutable fields: string list; mutable models: (string * ty) list}
+type type_storage = {
+  mutable fields: string list;
+  mutable models: (string * ty) list;
+  mutable null_field: string option; }
+
+(* printers for debuging *)
+let rec pp_ty ty =
+  match ty with
+  | TyApp (s, tys) -> Format.printf "%s" s;
+    if tys <> [] then Format.printf "["; List.iter (fun e -> pp_ty e) tys; Format.printf "]"
+  | TyVar s -> Format.printf "%s" s
+
+let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
+  Printf.printf "%s -> \n" x; Format.printf "\tfields:: ";
+  List.iter (fun field -> Format.printf "%s " field) y.fields;
+  Format.printf "\n\tmodels::";
+  List.iter (fun (m, ty)-> Format.printf "(%s: " m; pp_ty ty; Format.printf ")") y.models;
+  Format.printf "\n\tnull_field:: %s" (match y.null_field with None -> "None" | Some s -> "Some " ^ s);
+  Format.printf "@.") ty_ht
 
 let ty_ht = Hashtbl.create 8
-
-(* let rec flat_list l = *)
-(*   match l with *)
-(*   | [] -> [] *)
-(*   | hd :: tl -> hd @ flat_list tl *)
 
 let keyword = function
   | "int"  -> "Int"
@@ -60,13 +72,92 @@ let rec to_field lbls =
     lbl.Parsetree.pld_name.txt :: sl,
     DField (lbl.pld_name.txt, to_type lbl.pld_type) :: decls
 
+let rec to_fields constrdecls =
+  match constrdecls with
+  | [] -> [], []
+  | constrdecl :: tl ->
+    let (stringl, decll) = (match constrdecl.Parsetree.pcd_args with
+    | Pcstr_tuple [] -> ([], [])
+    | Pcstr_record lbls -> to_field lbls
+    | _ -> assert false
+    ) in
+    let sl, decls = to_fields tl in stringl @ sl, decll @ decls
+
+let get_payload_name payload =
+  match payload with
+  | Parsetree.PStr [{pstr_desc; _}] ->
+    (match pstr_desc with
+    | Pstr_eval (exp, _) ->
+      (match exp.pexp_desc with
+      | Pexp_constant s ->
+        (match s with
+        | Pconst_string (s, _, _) -> s
+        | _ -> assert false)
+      | _ -> assert false)
+    (*
+    | Pstr_value of rec_flag * value_binding list
+        (** [Pstr_value(rec, [(P1, E1 ; ... ; (Pn, En))])] represents:
+              - [let P1 = E1 and ... and Pn = EN]
+                  when [rec] is {{!Asttypes.rec_flag.Nonrecursive}[Nonrecursive]},
+              - [let rec P1 = E1 and ... and Pn = EN ]
+                  when [rec] is {{!Asttypes.rec_flag.Recursive}[Recursive]}.
+          *)
+    | Pstr_primitive of value_description
+        (** - [val x: T]
+              - [external x: T = "s1" ... "sn" ]*)
+    | Pstr_type of rec_flag * type_declaration list
+        (** [type t1 = ... and ... and tn = ...] *)
+    | Pstr_typext of type_extension  (** [type t1 += ...] *)
+    | Pstr_exception of type_exception
+        (** - [exception C of T]
+              - [exception C = M.X] *)
+    | Pstr_module of module_binding  (** [module X = ME] *)
+    | Pstr_recmodule of module_binding list
+        (** [module rec X1 = ME1 and ... and Xn = MEn] *)
+    | Pstr_modtype of module_type_declaration  (** [module type S = MT] *)
+    | Pstr_open of open_declaration  (** [open X] *)
+    | Pstr_class of class_declaration list
+        (** [class c1 = ... and ... and cn = ...] *)
+    | Pstr_class_type of class_type_declaration list
+        (** [class type ct1 = ... and ... and ctn = ...] *)
+    | Pstr_include of include_declaration  (** [include ME] *)
+    | Pstr_attribute of attribute  (** [[\@\@\@id]] *)
+    | Pstr_extension of extension * attributes  (** [[%%id]] *)
+    *)
+    | _ -> assert false)
+  (*
+  | PSig of signature  (** [: SIG] in an attribute or an extension point *)
+  | PTyp of core_type  (** [: T] in an attribute or an extension point *)
+  | PPat of pattern * expression option
+  *)
+  | _ -> assert false
+
+let rec get_attributes attrs =
+  match attrs with
+  | [] -> []
+  | attr :: tl ->
+    (attr.Parsetree.attr_name.txt, get_payload_name attr.attr_payload )
+    :: get_attributes tl
+
+let find_attr attrs target_name target_field =
+  List.exists (fun (name, field) ->
+    name = target_name && field = target_field) attrs
+
 let to_type_def decl =
   match decl.Uast.tkind with
-  | Ptype_record lbls -> to_field lbls
+  | Ptype_record lbls ->
+    to_field lbls, None
+  | Ptype_variant constr_l ->
+    (match constr_l with
+    | constr :: _tl ->
+      let attrs = get_attributes constr.pcd_attributes in
+      let str_opt = if find_attr attrs "viper" "null"
+        then Some (constr.pcd_name.txt)
+        else None in
+      to_fields constr_l, str_opt
+    | _ -> assert false)
   (*
   | Ptype_abstract
-  | Ptype_variant of constructor_declaration list
-  | Ptype_record of label_declaration list
   | Ptype_open
   *)
   | _ -> assert false
@@ -126,6 +217,10 @@ let to_binop = function
   | Timplies -> BImpl
   | Tiff -> assert false
 
+let is_field_null ty_ht str_field =
+  Hashtbl.fold (fun _ y acc -> acc ||
+  match y.null_field with None -> false | Some s -> s = str_field) ty_ht false
+
 let rec to_term term =
   match term.Gospel.Uast.term_desc with
   | Ttrue  -> TBool true
@@ -138,6 +233,7 @@ let rec to_term term =
   | Tpreid name ->
     (match to_string name with
     | "empty" | "Sequence.empty" -> TSeq (TEmpty (TyVar "Int"))
+    | null_field when is_field_null ty_ht null_field -> TNull
     | default -> TVar (None, default))
   | Tfield (term, field) ->
     TVar (Some (to_term term), to_string field)
@@ -254,9 +350,10 @@ let struct_desc d =
     let models = (match ty_decl.tspec with
     | None -> []
     | Some spec -> get_spec_fields spec.ty_field) in
-    Hashtbl.add ty_ht ty_decl.tname.txt {fields = []; models = []};
-    let fields, r = to_type_def ty_decl in
-    Hashtbl.replace ty_ht ty_decl.tname.txt {fields; models}; r
+    Hashtbl.add ty_ht ty_decl.tname.txt
+      {fields = []; models = []; null_field = None};
+    let (fields, r), null_field = to_type_def ty_decl in
+    Hashtbl.replace ty_ht ty_decl.tname.txt {fields; models; null_field}; r
   | Str_function f ->
     let args = to_args f.fun_params in
     (match f.fun_type with

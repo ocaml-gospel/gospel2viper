@@ -62,6 +62,7 @@ let rec pp_ty = function
 and pp_term = function
   | TConst n -> string (string_of_int n)
   | TBool  b -> if b then string "true" else string "false"
+  | TNull -> string "null"
   | TApp (_ty_opt, s, terms) ->
     group (string s ^^ parens (pp_list pp_term terms))
   | TVar (prefix, s) ->

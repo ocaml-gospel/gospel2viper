@@ -1,4 +1,4 @@
-type t = { mutable value : int; mutable next : t }
+type t = Nil[@viper "null"] | Cons of { mutable value : int; mutable next : t }
 (*@ mutable model view : integer sequence *)
 
 (*@ predicate lseg (from: t) (l: int sequence) (to: t) =
@@ -9,7 +9,6 @@ type t = { mutable value : int; mutable next : t }
         let ll = tl l in
         vv = from.value &&
         lseg from.next ll to *)
-
 type queue = {
   mutable length : int;
   mutable first : t;
@@ -20,9 +19,10 @@ type queue = {
       s[.. length s - 1] *)
 
 (*@ function end_seq (s : int sequence) : int sequence =
-      let n = length s - 1 in
-      let v = get s n in
-      singleton v *)
+      let max  = length s - 1 in
+      let end = get s max in
+      singleton end *)
+(*@ requires s <> empty *)
 
 (*@ predicate queue (q: queue) (l: int sequence) =
       q ~~> {length; first; last} &&
@@ -34,3 +34,9 @@ type queue = {
         let r = end_seq l in
         lseg q.first ll q.last &&
         lseg q.last r Nil *)
+
+(* let create () =
+  { length = 0; first = Nil; last = Nil }
+(*@ q = create ()
+      ensures queue q empty *)
+*)

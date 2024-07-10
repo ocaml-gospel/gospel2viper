@@ -39,3 +39,19 @@ let create () : queue =
   { length = 0; first = Nil; last = Nil }
 (*@ q = create ()
       ensures queue q empty *)
+
+let clear (q: queue) =
+  q.length <- 0;
+  q.first  <- Nil;
+  q.last   <- Nil
+(*@ clear q [l: int sequence]
+    requires queue q l
+    ensures  queue q empty *)
+
+let clear_alt (q: queue) =
+  q.length <- 0;
+  q.first  <- Nil;
+  q.last   <- Nil
+(*@ clear_alt q
+    requires q ~~> {length; first; last}
+    ensures queue q empty *)

@@ -129,6 +129,7 @@ let rec pp_expr = function
   | ENew (exprs) -> nnew ^^ parens (pp_list pp_expr exprs)
   | EAssig (e1, e2) -> pp_expr e1 ^^ spaceassignspace ^^ pp_expr e2
   | EVar (lbl, ty)  -> varspace ^^ string lbl ^^ spacecolonspace ^^ pp_ty ty
+  | ESequence (e1, e2) -> pp_expr e1 ^^ hardline ^^ pp_expr e2
 and pp_eseq = function
   | EEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | ESingleton expr -> string "Seq" ^^ parens (pp_expr expr)

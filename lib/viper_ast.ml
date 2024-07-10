@@ -68,7 +68,10 @@ and expr =
   | ENew of (expr list)
     (* new(e1, e2, ...) *)
   | EAssig of expr * expr
-    (* t1 := t2 *)
+    (* e1 := e2 *)
+  | ESequence of expr * expr
+     (* e1
+        e2 *)
 and eseq =
   | EEmpty of ty
     (* Seq[Int]() *)

@@ -35,8 +35,7 @@ type queue = {
         lseg q.first ll q.last &&
         lseg q.last r Nil *)
 
-(* let create () =
+let create () : queue =
   { length = 0; first = Nil; last = Nil }
 (*@ q = create ()
       ensures queue q empty *)
-*)

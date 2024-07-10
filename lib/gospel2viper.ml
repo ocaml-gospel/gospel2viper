@@ -10,23 +10,28 @@ type type_storage = {
 let rec pp_ty ty =
   match ty with
   | TyApp (s, tys) -> Format.printf "%s" s;
-    if tys <> [] then Format.printf "["; List.iter (fun e -> pp_ty e) tys; Format.printf "]"
+    if tys <> [] then Format.printf "[";
+    List.iter (fun e -> pp_ty e) tys; Format.printf "]"
   | TyVar s -> Format.printf "%s" s
 
 let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
   Printf.printf "%s -> \n" x; Format.printf "\tfields:: ";
   List.iter (fun field -> Format.printf "%s " field) y.fields;
   Format.printf "\n\tmodels::";
-  List.iter (fun (m, ty)-> Format.printf "(%s: " m; pp_ty ty; Format.printf ")") y.models;
-  Format.printf "\n\tnull_field:: %s" (match y.null_field with None -> "None" | Some s -> "Some " ^ s);
+  List.iter (fun (m, ty)->
+    Format.printf "(%s: " m; pp_ty ty; Format.printf ")") y.models;
+  Format.printf "\n\tnull_field:: %s"
+    (match y.null_field with None -> "None" | Some s -> "Some " ^ s);
   Format.printf "@.") ty_ht
 
-let ty_ht = Hashtbl.create 8
+(* stores data from ocaml type definition *)
+let ty_ht : (string, type_storage) Hashtbl.t = Hashtbl.create 8
 
 let keyword = function
   | "int"  -> "Int"
   | "bool" -> "Bool"
   | "sequence" -> "Seq"
+  | "infix ++" -> "++"
   | "infix +"  -> "+"
   | "infix -"  -> "-"
   | "infix *"  -> "*"
@@ -34,57 +39,52 @@ let keyword = function
   | "infix >"  -> ">"
   | "infix >=" -> ">="
   | "infix <"  -> "<"
-  | "infix <=" -> "<="
+  | "infix <=" -> "<+"
   | "infix ="  -> "=="
   | "infix <>" -> "!="
-  | "infix ++" -> "++"
   | default -> default
 
-let to_type t =
+let core_type_to_ty t =
   match t.Parsetree.ptyp_desc with
-  | Ptyp_constr (lident, []) ->
-    (match lident.txt with
+  | Ptyp_constr (id, []) ->
+    (match id.txt with
     | Lident s -> if Hashtbl.mem ty_ht s
-      then TyApp("Ref", [])
+      then TyApp ("Ref", [])
       else TyApp (keyword s, [])
     | _ -> assert false)
   | Ptyp_constr _ -> assert false
   (*
-  | Ptyp_any  (** [_] *)
-  | Ptyp_var of string  (** A type variable such as ['a] *)
+  | Ptyp_any
+  | Ptyp_var of string
   | Ptyp_arrow of arg_label * core_type * core_type
   | Ptyp_tuple of core_type list
   | Ptyp_object of object_field list * closed_flag
   | Ptyp_class of Longident.t loc * core_type list
-  | Ptyp_alias of core_type * string  (** [T as 'a]. *)
+  | Ptyp_alias of core_type * string
   | Ptyp_variant of row_field list * closed_flag * label list option
   | Ptyp_poly of string loc list * core_type
-  | Ptyp_package of package_type  (** [(module S)]. *)
-  | Ptyp_extension of extension  (** [[%id]]. *)
+  | Ptyp_package of package_type
+  | Ptyp_extension of extension
   *)
-  | _ -> assert false
+  | _ -> assert false (* TODO *)
 
-let rec to_field lbls =
-  match lbls with
+let rec lbls_to_field = function
   | [] -> [], []
   | lbl :: tl ->
-    let sl, decls = to_field tl in
+    let sl, decls = lbls_to_field tl in
     lbl.Parsetree.pld_name.txt :: sl,
-    DField (lbl.pld_name.txt, to_type lbl.pld_type) :: decls
+    DField (lbl.pld_name.txt, core_type_to_ty lbl.pld_type) :: decls
 
-let rec to_fields constrdecls =
-  match constrdecls with
+let rec constr_to_field = function
   | [] -> [], []
-  | constrdecl :: tl ->
-    let (stringl, decll) = (match constrdecl.Parsetree.pcd_args with
+  | constr :: tl ->
+    let (pre_sl, pre_decls) = (match constr.Parsetree.pcd_args with
     | Pcstr_tuple [] -> ([], [])
-    | Pcstr_record lbls -> to_field lbls
-    | _ -> assert false
-    ) in
-    let sl, decls = to_fields tl in stringl @ sl, decll @ decls
+    | Pcstr_record lbls -> lbls_to_field lbls
+    | _ -> assert false) in
+    let sl, decls = constr_to_field tl in pre_sl @ sl, pre_decls @ decls
 
-let get_payload_name payload =
-  match payload with
+let get_payload_lbl = function
   | Parsetree.PStr [{pstr_desc; _}] ->
     (match pstr_desc with
     | Pstr_eval (exp, _) ->
@@ -96,78 +96,62 @@ let get_payload_name payload =
       | _ -> assert false)
     (*
     | Pstr_value of rec_flag * value_binding list
-        (** [Pstr_value(rec, [(P1, E1 ; ... ; (Pn, En))])] represents:
-              - [let P1 = E1 and ... and Pn = EN]
-                  when [rec] is {{!Asttypes.rec_flag.Nonrecursive}[Nonrecursive]},
-              - [let rec P1 = E1 and ... and Pn = EN ]
-                  when [rec] is {{!Asttypes.rec_flag.Recursive}[Recursive]}.
-          *)
     | Pstr_primitive of value_description
-        (** - [val x: T]
-              - [external x: T = "s1" ... "sn" ]*)
     | Pstr_type of rec_flag * type_declaration list
-        (** [type t1 = ... and ... and tn = ...] *)
-    | Pstr_typext of type_extension  (** [type t1 += ...] *)
+    | Pstr_typext of type_extension
     | Pstr_exception of type_exception
-        (** - [exception C of T]
-              - [exception C = M.X] *)
-    | Pstr_module of module_binding  (** [module X = ME] *)
+    | Pstr_module of module_binding
     | Pstr_recmodule of module_binding list
-        (** [module rec X1 = ME1 and ... and Xn = MEn] *)
-    | Pstr_modtype of module_type_declaration  (** [module type S = MT] *)
-    | Pstr_open of open_declaration  (** [open X] *)
+    | Pstr_modtype of module_type_declaration
+    | Pstr_open of open_declaration
     | Pstr_class of class_declaration list
-        (** [class c1 = ... and ... and cn = ...] *)
     | Pstr_class_type of class_type_declaration list
-        (** [class type ct1 = ... and ... and ctn = ...] *)
-    | Pstr_include of include_declaration  (** [include ME] *)
-    | Pstr_attribute of attribute  (** [[\@\@\@id]] *)
-    | Pstr_extension of extension * attributes  (** [[%%id]] *)
+    | Pstr_include of include_declaration
+    | Pstr_attribute of attribute
+    | Pstr_extension of extension * attributes
     *)
-    | _ -> assert false)
+    | _ -> assert false) (* TODO *)
   (*
-  | PSig of signature  (** [: SIG] in an attribute or an extension point *)
-  | PTyp of core_type  (** [: T] in an attribute or an extension point *)
+  | PSig of signature
+  | PTyp of core_type
   | PPat of pattern * expression option
   *)
-  | _ -> assert false
+  | _ -> assert false (* TODO *)
 
-let rec get_attributes attrs =
-  match attrs with
+let rec get_attributes = function
   | [] -> []
   | attr :: tl ->
-    (attr.Parsetree.attr_name.txt, get_payload_name attr.attr_payload )
+    (attr.Parsetree.attr_name.txt, get_payload_lbl attr.attr_payload)
     :: get_attributes tl
 
-let find_attr attrs target_name target_field =
+let find_attribute attrs target_name target_field =
   List.exists (fun (name, field) ->
     name = target_name && field = target_field) attrs
 
 let to_type_def decl =
   match decl.Uast.tkind with
   | Ptype_record lbls ->
-    to_field lbls, None
+    lbls_to_field lbls, None
   | Ptype_variant constr_l ->
     (match constr_l with
     | constr :: _tl ->
       let attrs = get_attributes constr.pcd_attributes in
-      let str_opt = if find_attr attrs "viper" "null"
+      let str_opt = if find_attribute attrs "viper" "null"
         then Some (constr.pcd_name.txt)
         else None in
-      to_fields constr_l, str_opt
+      constr_to_field constr_l, str_opt
     | _ -> assert false)
   (*
   | Ptype_abstract
   | Ptype_open
   *)
-  | _ -> assert false
+  | _ -> assert false (* TODO *)
 
-let rec to_string = function
+let rec id_to_string = function
   | Uast.Qpreid s -> s.pid_str
-  | Qdot (qualid, s) -> to_string qualid ^ "." ^ s.pid_str
+  | Qdot (qualid, s) -> id_to_string qualid ^ "." ^ s.pid_str
 
-let rec get_ty_lbl pty =
-  match pty with
+let rec get_ty_lbl = function
   | Uast.PTtyapp (Qpreid preid, []) -> keyword preid.pid_str
   | Uast.PTtyapp (_name, hd :: _tl) -> get_ty_lbl hd
   (*
@@ -175,41 +159,39 @@ let rec get_ty_lbl pty =
   | PTtuple of pty list
   | PTarrow of labelled_arg * pty * pty
   *)
-  | _ -> assert false
+  | _ -> assert false (* TODO *)
 
-let rec to_ty ty =
-  match ty with
-  | Uast.PTtyapp (name, tys) ->
-    TyApp (keyword (to_string name), to_ty_list tys)
+let rec pty_to_ty = function
+  | Uast.PTtyapp (id, tys) ->
+    TyApp (keyword (id_to_string id), to_ty_list tys)
   | _ -> assert false
 and to_ty_list = function
   | [] -> []
-  | t :: tl -> to_ty t :: to_ty_list tl
+  | t :: tl -> pty_to_ty t :: to_ty_list tl
 
-let rec to_args fl =
-  match fl with
+let rec to_args = function
   | [] -> []
-  | (_loc, preid, pty) :: tl ->
-    let ty = to_ty pty in
+  | (_, preid, pty) :: tl ->
+    let ty = pty_to_ty pty in
     let str = get_ty_lbl pty in
     (if Hashtbl.mem ty_ht str
-    then (preid.Identifier.Preid.pid_str, TyApp ("Ref", []))
-    else (preid.Identifier.Preid.pid_str, ty) ) :: to_args tl
+     then (preid.Identifier.Preid.pid_str, TyApp ("Ref", []))
+     else (preid.Identifier.Preid.pid_str, ty)) :: to_args tl
 
-let rec get_spec_fields spec =
-  match spec with
+let rec get_spec_fields = function
   | [] -> []
   | hd :: tl ->
-    (hd.Uast.f_preid.pid_str, to_ty hd.Uast.f_pty) :: get_spec_fields tl
+    (hd.Uast.f_preid.pid_str, pty_to_ty hd.Uast.f_pty) :: get_spec_fields tl
 
 let to_const = function
-  | Parsetree.Pconst_integer (n, _char_opt) -> TConst (int_of_string n)
+  | Parsetree.Pconst_integer (n, _char_opt) ->
+    CInt (int_of_string n) (* TODO *)
   (*
   | Pconst_char of char
   | Pconst_string of label * location * label option
   | Pconst_float of label * char option
   *)
-  | _ -> assert false
+  | _ -> assert false (* TODO *)
 
 let to_binop = function
   | Uast.Tand | Tand_asym -> BAnd
@@ -217,64 +199,78 @@ let to_binop = function
   | Timplies -> BImpl
   | Tiff -> assert false
 
-let is_field_null ty_ht str_field =
+let is_field_null ty_ht field_name =
   Hashtbl.fold (fun _ y acc -> acc ||
-  match y.null_field with None -> false | Some s -> s = str_field) ty_ht false
+  match y.null_field with None -> false | Some s -> s = field_name) ty_ht false
 
 let rec to_term term =
   match term.Gospel.Uast.term_desc with
   | Ttrue  -> TBool true
   | Tfalse -> TBool false
-  | Tconst c -> to_const c
+  | Tconst c -> TConst (to_const c)
   | Tbinop (t1, binop, t2) ->
     TBinop (to_term t1, to_binop binop, to_term t2)
   | Tinfix (t1, infix, t2) ->
     TInfix (to_term t1, keyword infix.pid_str, to_term t2)
-  | Tpreid name ->
-    (match to_string name with
+  | Tpreid id ->
+    (match id_to_string id with
     | "empty" | "Sequence.empty" -> TSeq (TEmpty (TyVar "Int"))
     | null_field when is_field_null ty_ht null_field -> TNull
-    | default -> TVar (None, default))
-  | Tfield (term, field) ->
-    TVar (Some (to_term term), to_string field)
-  | Tapply (hd, term) ->
-    let argv = to_fun hd @ to_fun term in
+    | default -> TVar default)
+  | Tfield (t, field_id) ->
+    TField ((to_term t), id_to_string field_id)
+  | Tapply (hd, t) ->
+    let argv = to_term_list hd @ to_term_list t in
     let args = List.tl argv in
     let fun_name = (match List.hd argv with
-    | TVar (_, s) -> s
+    | TVar s -> s
     | _ -> assert false) in
     (match fun_name with
-    | "get" | "Sequence.get" -> (match args with
+    | "get" | "Sequence.get" ->
+      (match args with
       | [n; num] -> TSeq (TGet (n, num))
       | _ -> assert false)
     | "length" | "Sequence.length" -> TSeq (TLength (List.hd args))
-    | "tl" | "Sequence.tl"     -> TSeq (TSub (List.hd args, (TConst 1), None))
-    | "hd" | "Sequence.hd"     -> TSeq (TGet (List.hd args, (TConst 0)))
+    | "tl" | "Sequence.tl"     ->
+      TSeq (TSub (List.hd args, (TConst (CInt 1)), None))
+    | "hd" | "Sequence.hd"     ->
+      TSeq (TGet (List.hd args, (TConst (CInt 0))))
     | "singleton" | "Sequence.singleton" -> TSeq (TSingleton (List.hd args))
     | default  -> TApp (None, default, args))
   | Tlet (name, t1, t2) ->
     TLet (name.pid_str, to_term t1, to_term t2)
   | Tif (tif, tthen, telse) ->
     TTernary (to_term tif, to_term tthen, to_term telse)
-  | Tidapp (name, terms) ->
-    let str = to_string name in
+  | Tidapp (id, ts) ->
+    let str = id_to_string id in
     if String.starts_with ~prefix:"mixfix" str then
-      (match str, terms with
+      (match str, ts with
       | "mixfix [_]",    [name; t2] ->
         TSeq (TGet (to_term name, to_term t2))
       | "mixfix [_.._]", [name; min; max] ->
         TSeq (TSub (to_term name, to_term min, Some(to_term max)))
       | "mixfix [.._]",  [name; max] ->
-        TSeq (TSub (to_term name, TConst 0, Some(to_term max)))
+        TSeq (TSub (to_term name, TConst (CInt 0), Some(to_term max)))
       | "mixfix [_..]",  [name; min] ->
         TSeq (TSub (to_term name, to_term min, None))
       | _ -> assert false)
-    else (match terms with
+    else (match ts with
     | [t1; t2] ->
-      TInfix (to_term t1, keyword (to_string name), to_term t2)
+      TInfix (to_term t1, keyword (id_to_string id), to_term t2)
     | _ -> assert false)
+  | Tpoints (Qpreid id, fields) ->
+    let mk_acc (field, _) = match field with
+      | Uast.Qdot _ -> assert false (* TODO *)
+      | Qpreid field ->
+        Identifier.Preid.(TAcc (TVar(id.pid_str), field.pid_str)) in
+    let mk_and = function
+      | [] -> assert false
+      | field :: xs ->
+        List.fold_left (fun acc f -> TBinop (acc, BAnd, f)) field xs in
+    let fields_acc = List.rev (List.map mk_acc fields) in
+    mk_and fields_acc
+  | Tpoints (Qdot _, _) -> assert false (* TODO *)
   (*
-  | Tidapp of qualid * term list
   | Tnot of term
   | Tquant of quant * binder list * term
   | Tattr of string * term
@@ -286,65 +282,229 @@ let rec to_term term =
   | Tscope of qualid * term
   | Told of term
   *)
-  | Tpoints (Qpreid id, fields) ->
-    let mk_acc (field, _) = match field with
-      | Uast.Qdot _ -> assert false (* TODO *)
-      | Qpreid field ->
-        Identifier.Preid.(TAcc (id.pid_str, field.pid_str)) in
-    let mk_and = function
-      | [] -> assert false
-      | field :: xs ->
-        List.fold_left (fun acc f -> TBinop (acc, BAnd, f)) field xs in
-    let fields_acc = List.rev (List.map mk_acc fields) in
-    mk_and fields_acc
-  | Tpoints (Qdot _, _) ->
-      assert false (* TODO *)
-  | Tnot _ -> assert false (* TODO *)
-  | Tquant _ -> assert false (* TODO *)
   | _ -> assert false (* TODO *)
-(* and to_term_list t = *)
-(*   match t with *)
-(*   | Gospel.Uast.Ttuple terms -> (match terms with *)
-(*     | [] -> [] *)
-(*     | hd :: tl -> to_term hd :: to_term_list (Ttuple tl)) *)
-(*   | _ -> assert false *)
-
-and to_fun t : term list =
+and to_term_list t =
   (match t.Gospel.Uast.term_desc with
   | Gospel.Uast.Tpreid _ -> [to_term t]
-  | Tapply (hd2, t2) -> to_fun hd2 @ to_fun t2
+  | Tapply (hd, t2) -> to_term_list hd @ to_term_list t2
   | _ -> [to_term t])
 
-let to_def term_opt =
-  match term_opt with
+let to_body = function
   | None -> None
   | Some term -> Some (to_term term)
 
-let to_fun_body term_opt : term option =
-  match term_opt with
-  | None -> None
-  | Some term -> Some (to_term term)
-
-let rec scan_args fl =
-  match fl with
-  | [] -> []
-  | (_loc, preid, pty) :: tl ->
-    (match Hashtbl.find_opt ty_ht (get_ty_lbl pty) with
-    | None   -> []
-    | Some l ->
-      let rec iter = function
-      | [] -> []
-      | n :: tl -> (preid.Identifier.Preid.pid_str, n) :: iter tl in
-      iter l.fields) @ scan_args tl
-
-let to_spec (spec_opt : Gospel.Uast.fun_spec option): spec =
-  match spec_opt with
+let to_spec = function
   | None -> {spec_pre = []; spec_post = [];}
   | Some spec ->
-    {spec_pre = List.map to_term spec.fun_req;
-    spec_post = List.map to_term spec.fun_ens}
-let struct_desc d =
-  match d with
+    {spec_pre  = List.map to_term spec.Gospel.Uast.fun_req;
+     spec_post = List.map to_term spec.Gospel.Uast.fun_ens}
+
+let ppat_to_str = function
+  | Parsetree.Ppat_var str_loc -> str_loc.txt
+  (*
+  | Ppat_any
+  | Ppat_alias of pattern * string loc
+  | Ppat_constant of constant
+  | Ppat_interval of constant * constant
+  | Ppat_tuple of pattern list
+  | Ppat_construct of Longident.t loc * (string loc list * pattern) option
+  | Ppat_variant of label * pattern option
+  | Ppat_record of (Longident.t loc * pattern) list * closed_flag
+  | Ppat_array of pattern list
+  | Ppat_or of pattern * pattern
+  | Ppat_constraint of pattern * core_type
+  | Ppat_type of Longident.t loc
+  | Ppat_lazy of pattern
+  | Ppat_unpack of string option loc
+  | Ppat_exception of pattern
+  | Ppat_extension of extension
+  | Ppat_open of Longident.t loc * pattern
+  *)
+  | _ -> assert false (* TODO *)
+
+let rec ptyp_to_ty = function
+  | Parsetree.Ptyp_constr (_, []) -> TyVar "Int" (* TODO *)
+  | Ptyp_poly (_, ty) -> ptyp_to_ty ty.ptyp_desc
+  | _  -> assert false
+
+let constraint_to_lbl_ty pattern =
+  match pattern.Parsetree.ppat_desc with
+  | Parsetree.Ppat_constraint (pattern, ty) ->
+    Some (ppat_to_str pattern.ppat_desc, ptyp_to_ty ty.ptyp_desc)
+  | Ppat_construct (_, None) -> None
+  | Ppat_construct (_, _some) -> assert false
+  | _ -> failwith "ERROR: Constraint required"
+
+let rec unstack_expr expr acc =
+  match expr.Uast.spexp_desc with
+  | Sexp_fun (_, _, pattern, pexp_desc, _) ->
+    (match constraint_to_lbl_ty pattern with
+    | Some val_ty -> unstack_expr pexp_desc (val_ty :: acc)
+    | None -> unstack_expr pexp_desc acc)
+  | Sexp_constraint (expr, ty) -> acc, expr, Some ([core_type_to_ty ty])
+  | _ -> acc, expr, None
+
+let rec longident_to_str = function
+  | Longident.Lident s -> s
+  | Ldot (t, s) -> longident_to_str t ^ "DOT" ^ s (* TODO *)
+  | Lapply (t1, t2) ->
+    longident_to_str t1 ^ "APPLY" ^ longident_to_str t2 (* TODO *)
+
+let rec to_expr expr =
+  match expr.Uast.spexp_desc with
+  | Sexp_constant c -> [EConst (to_const c)]
+  | Sexp_construct (id, _) ->
+    (match longident_to_str id.Location.txt with
+    | null_field when is_field_null ty_ht null_field -> [ENull]
+    | default -> [EVariable default])
+  | Sexp_ident id -> [EVariable (longident_to_str id.txt)]
+  (*
+  | Sexp_let of rec_flag * s_value_binding list * s_expression
+  | Sexp_function of s_case list
+  | Sexp_fun of
+      arg_label
+      * s_expression option
+      * Parsetree.pattern
+      * s_expression
+      * fun_spec option
+  | Sexp_apply of s_expression * (arg_label * s_expression) list
+  | Sexp_match of s_expression * s_case list
+  | Sexp_try of s_expression * s_case list
+  | Sexp_tuple of s_expression list
+  | Sexp_variant of label * s_expression option
+  | Sexp_record of (Longident.t loc * s_expression) list * s_expression option
+  | Sexp_field of s_expression * Longident.t loc
+  | Sexp_setfield of s_expression * Longident.t loc * s_expression
+  | Sexp_array of s_expression list
+  | Sexp_ifthenelse of s_expression * s_expression * s_expression option
+  | Sexp_sequence of s_expression * s_expression
+  | Sexp_while of s_expression * s_expression * loop_spec option
+  | Sexp_for of
+      Parsetree.pattern
+      * s_expression
+      * s_expression
+      * direction_flag
+      * s_expression
+      * loop_spec option
+  | Sexp_constraint of s_expression * core_type
+  | Sexp_coerce of s_expression * core_type option * core_type
+  | Sexp_send of s_expression * label loc
+  | Sexp_new of Longident.t loc
+  | Sexp_setinstvar of label loc * s_expression
+  | Sexp_override of (label loc * s_expression) list
+  | Sexp_letmodule of string option loc * module_expr * s_expression
+  | Sexp_letexception of extension_constructor * s_expression
+  | Sexp_assert of s_expression
+  | Sexp_lazy of s_expression
+  | Sexp_poly of s_expression * core_type option
+  | Sexp_object of class_structure
+  | Sexp_newtype of string loc * s_expression
+  | Sexp_pack of s_module_expr
+  | Sexp_open of open_declaration * s_expression
+  | Sexp_letop of letop
+  | Sexp_extension of extension
+  | Sexp_unreachable
+  *)
+  | _ -> assert false (* TODO *)
+and to_expr_ret expr ret_val =
+  match expr.Uast.spexp_desc with
+  | Sexp_record (elems, _) ->
+    let ll = List.map (fun (id, expr) ->
+      longident_to_str id.Location.txt, to_expr expr) elems in
+    let evars = List.map (fun (evar, _) -> EVariable(evar)) ll in
+    EAssig (ret_val, ENew evars) :: (
+    List.map (fun (lbl, expr) ->
+      EAssig (EField (ret_val, lbl), List.hd expr)) ll)
+  | Sexp_constant c ->
+    [EAssig (ret_val, EConst (to_const c))]
+  | Sexp_let (_, binding :: _and, e2) ->
+    let e1 = binding.spvb_expr in
+    (match constraint_to_lbl_ty binding.spvb_pat with
+    | Some (let_name, let_ty) -> (EVar (let_name, let_ty)
+      :: to_expr_ret e1 (EVariable let_name))
+      @  to_expr_ret e2 ret_val
+    | None -> failwith "constraint is None")
+  | Sexp_let (_rec, [], _expr) -> assert false
+  | Sexp_ident id ->
+    [EAssig (ret_val, EVariable (longident_to_str id.txt))]
+  | Sexp_constraint (expr, _ty) -> to_expr_ret expr ret_val
+  (*
+  | Sexp_function of s_case list
+  | Sexp_fun of
+      arg_label
+      * s_expression option
+      * Parsetree.pattern
+      * s_expression
+      * fun_spec option
+  | Sexp_apply of s_expression * (arg_label * s_expression) list
+  | Sexp_match of s_expression * s_case list
+  | Sexp_try of s_expression * s_case list
+  | Sexp_tuple of s_expression list
+  | Sexp_construct of Longident.t loc * s_expression option
+  | Sexp_variant of label * s_expression option
+  | Sexp_field of s_expression * Longident.t loc
+  | Sexp_setfield of s_expression * Longident.t loc * s_expression
+  | Sexp_array of s_expression list
+  | Sexp_ifthenelse of s_expression * s_expression * s_expression option
+  | Sexp_sequence of s_expression * s_expression
+  | Sexp_while of s_expression * s_expression * loop_spec option
+  | Sexp_for of
+      Parsetree.pattern
+      * s_expression
+      * s_expression
+      * direction_flag
+      * s_expression
+      * loop_spec option
+  | Sexp_coerce of s_expression * core_type option * core_type
+  | Sexp_send of s_expression * label loc
+  | Sexp_new of Longident.t loc
+  | Sexp_setinstvar of label loc * s_expression
+  | Sexp_override of (label loc * s_expression) list
+  | Sexp_letmodule of string option loc * module_expr * s_expression
+  | Sexp_letexception of extension_constructor * s_expression
+  | Sexp_assert of s_expression
+  | Sexp_lazy of s_expression
+  | Sexp_poly of s_expression * core_type option
+  | Sexp_object of class_structure
+  | Sexp_newtype of string loc * s_expression
+  | Sexp_pack of s_module_expr
+  | Sexp_open of open_declaration * s_expression
+  | Sexp_letop of letop
+  | Sexp_extension of extension
+  | Sexp_unreachable
+  *)
+  | _ -> assert false (* TODO *)
+
+let to_meth_body body = function
+  | [] -> to_expr body
+  | (lbl, _) :: _ -> to_expr_ret body (EVariable lbl)
+
+let to_str_list lbl_arg_list =
+  List.map (function
+    | Uast.Lunit -> ""
+    | Lnone s -> s.pid_str
+    | Loptional s -> s.pid_str
+    | Lnamed s -> s.pid_str
+    | Lghost _ -> assert false
+  ) lbl_arg_list
+
+let get_ret_pre_post = function
+  | None   -> None, [], []
+  | Some s ->
+    let val_ret = (match s.Uast.sp_header with
+    | None   -> None
+    | Some h -> Some (to_str_list h.sp_hd_ret)) in
+    val_ret, List.map to_term s.sp_pre, List.map to_term s.sp_post
+
+let merge_returns ret_names_opt tys_opt =
+  match ret_names_opt, tys_opt with
+  | None, None -> []
+  | Some ret_names, Some tys ->
+    (try List.map2 (fun name -> fun ty -> name, ty) ret_names tys
+     with Invalid_argument _ -> assert false)
+  | _ -> failwith "ERROR: Not the same amount of parameters and type"
+
+let struct_desc = function
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
     (* For the moment, no "and" in type declaration *)
     let models = (match ty_decl.tspec with
@@ -360,20 +520,34 @@ let struct_desc d =
     | None ->
       [DPredicate {
         pred_name = f.fun_name.pid_str;
-        pred_body = to_def f.fun_def;
+        pred_body = to_body f.fun_def;
         pred_args = args;
       }]
     | Some ret_ty -> [DFunction {
         function_name = f.fun_name.pid_str;
         function_args = args;
-        function_rety = to_ty ret_ty;
+        function_rety = pty_to_ty ret_ty;
         function_spec = to_spec f.fun_spec;
-        function_body = to_fun_body f.fun_def;
+        function_body = to_body f.fun_def;
     }])
-    | Str_value (_rec_f, _bindings) -> assert false
+    | Str_value (_rec_f, [{spvb_pat; spvb_expr; spvb_vspec;_}]) ->
+      let args, body, tys_opt = unstack_expr spvb_expr [] in
+      let ret_names_opt, pre, post = get_ret_pre_post spvb_vspec in
+      let returns : (label * ty) list = merge_returns ret_names_opt tys_opt in
+      [DMethod {
+        method_name = ppat_to_str spvb_pat.ppat_desc;
+        method_args = args;
+        method_returns = returns;
+        method_spec = {
+          spec_pre  = pre;
+          spec_post = post;
+        };
+        method_body = Some (to_meth_body body returns);
+      }]
+    | Str_value (_rec_f, _) -> assert false
+    (* For the moment, no "and" in type declaration *)
   (*
   | Str_eval of s_expression * attributes
-  | Str_value of rec_flag * s_value_binding list
   | Str_primitive of s_val_description
   | Str_typext of type_extension
   | Str_exception of type_exception
@@ -391,7 +565,7 @@ let struct_desc d =
   | Str_ghost_val of s_val_description
   | Str_ghost_open of open_declaration
   *)
-  | _ -> assert false
+  | _ -> assert false (* TODO *)
 
 let cameleer_structure_item i = struct_desc i.Uast.sstr_desc
 

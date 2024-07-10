@@ -322,8 +322,18 @@ let ppat_to_str = function
   *)
   | _ -> assert false (* TODO *)
 
+let rec longident_to_str = function
+  | Longident.Lident s -> s
+  | Ldot (t, s) -> longident_to_str t ^ "DOT" ^ s (* TODO *)
+  | Lapply (t1, t2) ->
+    longident_to_str t1 ^ "APPLY" ^ longident_to_str t2 (* TODO *)
+
 let rec ptyp_to_ty = function
-  | Parsetree.Ptyp_constr (_, []) -> TyVar "Int" (* TODO *)
+  | Parsetree.Ptyp_constr (idloc, []) ->
+    let str = longident_to_str idloc.txt in
+    if Hashtbl.mem ty_ht str
+    then TyApp ("Ref", [])
+    else TyApp (str, []) (* TODO for multiple types like Seq[Int] *)
   | Ptyp_poly (_, ty) -> ptyp_to_ty ty.ptyp_desc
   | _  -> assert false
 
@@ -344,12 +354,6 @@ let rec unstack_expr expr acc =
   | Sexp_constraint (expr, ty) -> acc, expr, Some ([core_type_to_ty ty])
   | _ -> acc, expr, None
 
-let rec longident_to_str = function
-  | Longident.Lident s -> s
-  | Ldot (t, s) -> longident_to_str t ^ "DOT" ^ s (* TODO *)
-  | Lapply (t1, t2) ->
-    longident_to_str t1 ^ "APPLY" ^ longident_to_str t2 (* TODO *)
-
 let rec to_expr expr =
   match expr.Uast.spexp_desc with
   | Sexp_constant c -> [EConst (to_const c)]
@@ -358,6 +362,10 @@ let rec to_expr expr =
     | null_field when is_field_null ty_ht null_field -> [ENull]
     | default -> [EVariable default])
   | Sexp_ident id -> [EVariable (longident_to_str id.txt)]
+  (* | Sexp_setinstvar (_lbl, _expr) -> assert false *)
+  (* | Sexp_field (expr, id) -> [EField (List.hd (to_expr expr), longident_to_str id.txt)] *)
+  | Sexp_setfield (e1, id, e2) -> [EAssig (EField (List.hd (to_expr e1), longident_to_str id.txt), List.hd (to_expr e2))]
+  | Sexp_sequence (e1, e2) -> [ESequence (List.hd (to_expr e1), List.hd (to_expr e2))]
   (*
   | Sexp_let of rec_flag * s_value_binding list * s_expression
   | Sexp_function of s_case list
@@ -390,7 +398,6 @@ let rec to_expr expr =
   | Sexp_coerce of s_expression * core_type option * core_type
   | Sexp_send of s_expression * label loc
   | Sexp_new of Longident.t loc
-  | Sexp_setinstvar of label loc * s_expression
   | Sexp_override of (label loc * s_expression) list
   | Sexp_letmodule of string option loc * module_expr * s_expression
   | Sexp_letexception of extension_constructor * s_expression
@@ -428,6 +435,7 @@ and to_expr_ret expr ret_val =
   | Sexp_ident id ->
     [EAssig (ret_val, EVariable (longident_to_str id.txt))]
   | Sexp_constraint (expr, _ty) -> to_expr_ret expr ret_val
+  | Sexp_field (expr, id) -> [EAssig (ret_val, EField (List.hd (to_expr expr), longident_to_str id.txt))]
   (*
   | Sexp_function of s_case list
   | Sexp_fun of
@@ -488,13 +496,25 @@ let to_str_list lbl_arg_list =
     | Lghost _ -> assert false
   ) lbl_arg_list
 
-let get_ret_pre_post = function
-  | None   -> None, [], []
+let rec get_ghost_args (args: Gospel.Uast.labelled_arg list) : (string * ty) list =
+  match args with
+  | [] -> []
+  | arg :: tl ->
+    (match arg with
+    | Uast.Lghost (name, pty) -> [name.pid_str, pty_to_ty pty]
+    | _ -> []) @ get_ghost_args tl
+
+let get_gargs_ret_pre_post = function
+  | None   -> [], None, [], []
   | Some s ->
-    let val_ret = (match s.Uast.sp_header with
-    | None   -> None
-    | Some h -> Some (to_str_list h.sp_hd_ret)) in
-    val_ret, List.map to_term s.sp_pre, List.map to_term s.sp_post
+    let ghost_args, val_ret = (match s.Uast.sp_header with
+    | None   -> [], None
+    | Some h ->
+      get_ghost_args h.sp_hd_args,
+      match to_str_list h.sp_hd_ret with
+      | [] -> None
+      | _  -> Some (to_str_list h.sp_hd_ret)) in
+    ghost_args, val_ret, List.map to_term s.sp_pre, List.map to_term s.sp_post
 
 let merge_returns ret_names_opt tys_opt =
   match ret_names_opt, tys_opt with
@@ -532,11 +552,11 @@ let struct_desc = function
     }])
     | Str_value (_rec_f, [{spvb_pat; spvb_expr; spvb_vspec;_}]) ->
       let args, body, tys_opt = unstack_expr spvb_expr [] in
-      let ret_names_opt, pre, post = get_ret_pre_post spvb_vspec in
-      let returns : (label * ty) list = merge_returns ret_names_opt tys_opt in
+      let ghost_args, ret_names_opt, pre, post = get_gargs_ret_pre_post spvb_vspec in
+      let returns = merge_returns ret_names_opt tys_opt in
       [DMethod {
         method_name = ppat_to_str spvb_pat.ppat_desc;
-        method_args = args;
+        method_args = args @ ghost_args;
         method_returns = returns;
         method_spec = {
           spec_pre  = pre;

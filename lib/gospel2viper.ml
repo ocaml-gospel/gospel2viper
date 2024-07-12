@@ -27,6 +27,9 @@ let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
 (* stores data from ocaml type definition *)
 let ty_ht : (string, type_storage) Hashtbl.t = Hashtbl.create 8
 
+let is_infix str =
+  List.mem str ["+"; "-"; "*"; "/"; ">"; ">="; "<"; "<="; "=="; "!="]
+
 let keyword = function
   | "int"  -> "Int"
   | "bool" -> "Bool"
@@ -40,8 +43,8 @@ let keyword = function
   | "infix >=" -> ">="
   | "infix <"  -> "<"
   | "infix <=" -> "<+"
-  | "infix ="  -> "=="
-  | "infix <>" -> "!="
+  | "="  | "infix ="  -> "=="
+  | "<>" | "infix <>" -> "!="
   | default -> default
 
 let core_type_to_ty t =
@@ -330,7 +333,7 @@ let rec longident_to_str = function
 
 let rec ptyp_to_ty = function
   | Parsetree.Ptyp_constr (idloc, []) ->
-    let str = longident_to_str idloc.txt in
+    let str = keyword (longident_to_str idloc.txt) in
     if Hashtbl.mem ty_ht str
     then TyApp ("Ref", [])
     else TyApp (str, []) (* TODO for multiple types like Seq[Int] *)
@@ -356,18 +359,42 @@ let rec unstack_expr expr acc =
 
 let rec to_expr expr =
   match expr.Uast.spexp_desc with
-  | Sexp_constant c -> [EConst (to_const c)]
+  | Sexp_constant c -> EConst (to_const c)
   | Sexp_construct (id, _) ->
     (match longident_to_str id.Location.txt with
-    | null_field when is_field_null ty_ht null_field -> [ENull]
-    | default -> [EVariable default])
-  | Sexp_ident id -> [EVariable (longident_to_str id.txt)]
-  (* | Sexp_setinstvar (_lbl, _expr) -> assert false *)
-  (* | Sexp_field (expr, id) -> [EField (List.hd (to_expr expr), longident_to_str id.txt)] *)
-  | Sexp_setfield (e1, id, e2) -> [EAssig (EField (List.hd (to_expr e1), longident_to_str id.txt), List.hd (to_expr e2))]
-  | Sexp_sequence (e1, e2) -> [ESequence (List.hd (to_expr e1), List.hd (to_expr e2))]
+    | null_field when is_field_null ty_ht null_field -> ENull
+    | default -> EVariable default)
+  | Sexp_ident id -> EVariable (longident_to_str id.txt)
+  | Sexp_let (_, binding :: _and, e2) ->
+    let e1 = binding.spvb_expr in
+    (match constraint_to_lbl_ty binding.spvb_pat with
+    | Some (let_name, let_ty) ->
+      ESequence (
+        ESequence (
+          EVar (let_name, let_ty), to_expr_ret e1 (EVariable let_name)
+        ),to_expr e2 )
+    | None -> failwith "constraint is None")
+  | Sexp_let (_rec, [], _expr) -> assert false
+  | Sexp_setfield (e1, id, e2) ->
+    EAssig (EField (to_expr e1, longident_to_str id.txt), to_expr e2)
+  | Sexp_sequence (e1, e2) -> ESequence (to_expr e1, to_expr e2)
+  | Sexp_ifthenelse (eif, ethen, eelse_opt) ->
+    EIf (to_expr eif, to_expr ethen,
+      match eelse_opt with | None -> None | Some eelse -> Some (to_expr eelse))
+  | Sexp_apply (e1, exprs) ->
+    (match e1.spexp_desc with
+    | Sexp_ident id ->
+      let fun_name = keyword (longident_to_str id.txt) in
+      (match exprs, fun_name with
+      | [(_, e1); (_, e2)], infix when is_infix infix ->
+        EInfix (to_expr e1, infix, to_expr e2)
+      | exprs, fun_name ->
+        let expr_l = List.map (fun (_, e) -> to_expr e) exprs in
+        EApp (fun_name, expr_l))
+    | _ -> assert false)
+  | Sexp_assert e -> EAssert (to_expr e)
+  | Sexp_field (e, id) -> EField (to_expr e, longident_to_str id.txt)
   (*
-  | Sexp_let of rec_flag * s_value_binding list * s_expression
   | Sexp_function of s_case list
   | Sexp_fun of
       arg_label
@@ -382,7 +409,6 @@ let rec to_expr expr =
   | Sexp_variant of label * s_expression option
   | Sexp_record of (Longident.t loc * s_expression) list * s_expression option
   | Sexp_field of s_expression * Longident.t loc
-  | Sexp_setfield of s_expression * Longident.t loc * s_expression
   | Sexp_array of s_expression list
   | Sexp_ifthenelse of s_expression * s_expression * s_expression option
   | Sexp_sequence of s_expression * s_expression
@@ -416,26 +442,45 @@ let rec to_expr expr =
 and to_expr_ret expr ret_val =
   match expr.Uast.spexp_desc with
   | Sexp_record (elems, _) ->
-    let ll = List.map (fun (id, expr) ->
+    let lbld_exprs = List.map (fun (id, expr) ->
       longident_to_str id.Location.txt, to_expr expr) elems in
-    let evars = List.map (fun (evar, _) -> EVariable(evar)) ll in
-    EAssig (ret_val, ENew evars) :: (
-    List.map (fun (lbl, expr) ->
-      EAssig (EField (ret_val, lbl), List.hd expr)) ll)
+    let seq_expr   = List.fold_left (fun acc (lbl, expr) ->
+      ESequence (
+        acc, EAssig (EField (ret_val, lbl), expr))) ESkip lbld_exprs in
+    let evars = List.map (fun (evar, _) -> EVariable(evar)) lbld_exprs in
+    ESequence (EAssig (ret_val, ENew evars), seq_expr)
   | Sexp_constant c ->
-    [EAssig (ret_val, EConst (to_const c))]
+    EAssig (ret_val, EConst (to_const c))
   | Sexp_let (_, binding :: _and, e2) ->
     let e1 = binding.spvb_expr in
     (match constraint_to_lbl_ty binding.spvb_pat with
-    | Some (let_name, let_ty) -> (EVar (let_name, let_ty)
-      :: to_expr_ret e1 (EVariable let_name))
-      @  to_expr_ret e2 ret_val
+    | Some (let_name, let_ty) ->
+      ESequence (
+        ESequence (
+          EVar (let_name, let_ty), to_expr_ret e1 (EVariable let_name)
+        ), to_expr_ret e2 ret_val)
     | None -> failwith "constraint is None")
   | Sexp_let (_rec, [], _expr) -> assert false
   | Sexp_ident id ->
-    [EAssig (ret_val, EVariable (longident_to_str id.txt))]
+    EAssig (ret_val, EVariable (longident_to_str id.txt))
   | Sexp_constraint (expr, _ty) -> to_expr_ret expr ret_val
-  | Sexp_field (expr, id) -> [EAssig (ret_val, EField (List.hd (to_expr expr), longident_to_str id.txt))]
+  | Sexp_field (expr, id) ->
+    EAssig (ret_val, EField (to_expr expr, longident_to_str id.txt))
+  | Sexp_ifthenelse (eif, ethen, eelse_opt) ->
+    EIf (to_expr eif, to_expr_ret ethen ret_val,
+      match eelse_opt with
+      | None -> None | Some eelse -> Some (to_expr_ret eelse ret_val))
+  | Sexp_apply (e1, exprs) ->
+    let infix = (match e1.spexp_desc with
+    | Sexp_ident id -> keyword (longident_to_str id.txt)
+    | _ -> failwith "should be a infix operator") in
+    (match exprs with
+    | [(_, e1); (_, e2)] ->
+      EAssig (ret_val, EInfix (to_expr e1, infix, to_expr e2))
+    | _ -> assert false)
+  | Sexp_construct (_id_loc, expr_opt) -> (match expr_opt with
+    | None -> ENull (* TODO *)
+    | Some expr -> to_expr_ret expr ret_val)
   (*
   | Sexp_function of s_case list
   | Sexp_fun of
@@ -496,7 +541,7 @@ let to_str_list lbl_arg_list =
     | Lghost _ -> assert false
   ) lbl_arg_list
 
-let rec get_ghost_args (args: Gospel.Uast.labelled_arg list) : (string * ty) list =
+let rec get_ghost_args args =
   match args with
   | [] -> []
   | arg :: tl ->
@@ -552,7 +597,8 @@ let struct_desc = function
     }])
     | Str_value (_rec_f, [{spvb_pat; spvb_expr; spvb_vspec;_}]) ->
       let args, body, tys_opt = unstack_expr spvb_expr [] in
-      let ghost_args, ret_names_opt, pre, post = get_gargs_ret_pre_post spvb_vspec in
+      let ghost_args, ret_names_opt, pre, post =
+        get_gargs_ret_pre_post spvb_vspec in
       let returns = merge_returns ret_names_opt tys_opt in
       [DMethod {
         method_name = ppat_to_str spvb_pat.ppat_desc;

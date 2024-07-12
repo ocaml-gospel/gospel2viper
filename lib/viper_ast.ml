@@ -47,6 +47,7 @@ and tseq =
 and expr =
   | EConst of const
   | EBool of bool
+  | ESkip
   | ENull
     (* null keyword for null references *)
   | EApp of label * (expr list)
@@ -72,6 +73,7 @@ and expr =
   | ESequence of expr * expr
      (* e1
         e2 *)
+  | EAssert of expr
 and eseq =
   | EEmpty of ty
     (* Seq[Int]() *)
@@ -101,7 +103,7 @@ type method_def = {
   method_args: (label * ty) list;
   method_returns: (label * ty) list;
   method_spec: spec;
-  method_body: (expr list) option;
+  method_body: expr option;
 }
 
 type function_def = {

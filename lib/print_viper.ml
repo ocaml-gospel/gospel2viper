@@ -19,6 +19,7 @@ let dotdot = string ".."
 let dot = string "."
 let implies = string "==>" ^^ break 1
 let crlet = string "let "
+let assertspace = string "assert "
 let spaceeqspace = string " == "
 let spaceinspace = string " in "
 let notspace = string "not "
@@ -110,6 +111,7 @@ and pp_tseq = function
 let rec pp_expr = function
   | EConst c -> pp_const c
   | EBool b -> if b then ttrue else ffalse
+  | ESkip -> empty
   | ENull -> null
   | EApp (name, exprs) -> string name ^^ parens (pp_list pp_expr exprs)
   | EVariable name -> string name
@@ -129,7 +131,11 @@ let rec pp_expr = function
   | ENew (exprs) -> nnew ^^ parens (pp_list pp_expr exprs)
   | EAssig (e1, e2) -> pp_expr e1 ^^ spaceassignspace ^^ pp_expr e2
   | EVar (lbl, ty)  -> varspace ^^ string lbl ^^ spacecolonspace ^^ pp_ty ty
-  | ESequence (e1, e2) -> pp_expr e1 ^^ hardline ^^ pp_expr e2
+  | ESequence (e1, e2) ->
+    (match e1 with
+    | ESkip -> pp_expr e2
+    | _ -> pp_expr e1 ^^ hardline ^^ pp_expr e2)
+  | EAssert e -> assertspace ^^ pp_expr e
 and pp_eseq = function
   | EEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | ESingleton expr -> string "Seq" ^^ parens (pp_expr expr)
@@ -173,13 +179,7 @@ let pp_returns returns =
 
 let pp_expr_body = function
   | None -> empty
-  | Some el -> braces (
-    let rec iter = function
-    | [] -> empty
-    | elem :: [] -> pp_expr elem
-    | elem :: tl -> pp_expr elem ^^ hardline ^^ iter tl in
-    iter el
-    )
+  | Some el -> braces (pp_expr el)
 
 let pp_method_def m =
     methspace ^^ string m.method_name ^^ pp_args m.method_args ^^

@@ -36,7 +36,7 @@ type queue = {
         lseg q.last r Nil *)
 
 let create () : queue =
-  { length = 0; first = Nil; last = Nil }
+  Cons { length = 0; first = Nil; last = Nil }
 (*@ q = create ()
       ensures queue q empty *)
 
@@ -55,3 +55,37 @@ let clear_alt (q: queue) =
 (*@ clear_alt q
     requires q ~~> {length; first; last}
     ensures queue q empty *)
+
+let add (x: int) (q: queue) =
+  let cell : queue = Cons { value = x; next = Nil} in
+  if q.last = Nil then (
+    q.length <- 1;
+    q.first <- cell;
+    q.last <- cell)
+  else (
+    q.length <- q.length + 1;
+    q.last.next <- cell;
+    q.last <- cell
+  )
+(*@ add x q [l: int sequence]
+    requires queue q l
+    ensures  queue q (l ++ (singleton x) ) *)
+
+
+let transfer (q1: queue) (q2: queue) =
+  if q1.length > 0 then
+    if q2.last = Nil then (
+      q2.length <- q1.length;
+      q2.first <- q1.first;
+      q2.last <- q1.last;
+      clear_alt q1)
+    else (
+      q2.length <- q2.length + q1.length;
+      q2.last.next <- q1.first;
+      q2.last <- q1.last;
+      clear_alt q1)
+(*@ transfer q1 q2 [l1: int sequence] [l2: int sequence]
+    requires queue q1 l1
+    requires queue q2 l2
+    ensures  queue q1 empty
+    ensures  queue q2 (l2 ++ l1) *)

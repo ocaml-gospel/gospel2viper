@@ -206,6 +206,10 @@ let is_field_null ty_ht field_name =
   Hashtbl.fold (fun _ y acc -> acc ||
   match y.null_field with None -> false | Some s -> s = field_name) ty_ht false
 
+let is_a_model ty_ht model_name =
+  Hashtbl.fold (fun _ y acc -> acc ||
+  List.exists (fun (s, _) -> s = model_name) y.models) ty_ht false
+
 let rec to_term term =
   match term.Gospel.Uast.term_desc with
   | Ttrue  -> TBool true
@@ -221,7 +225,9 @@ let rec to_term term =
     | null_field when is_field_null ty_ht null_field -> TNull
     | default -> TVar default)
   | Tfield (t, field_id) ->
-    TField ((to_term t), id_to_string field_id)
+    let s = id_to_string field_id in
+    if is_a_model ty_ht s then TApp (None, "_constr_model_", [to_term t])
+    else TField ((to_term t), s)
   | Tapply (hd, t) ->
     let argv = to_term_list hd @ to_term_list t in
     let args = List.tl argv in
@@ -273,6 +279,7 @@ let rec to_term term =
     let fields_acc = List.rev (List.map mk_acc fields) in
     mk_and fields_acc
   | Tpoints (Qdot _, _) -> assert false (* TODO *)
+  | Told t -> TOld (to_term t)
   (*
   | Tnot of term
   | Tquant of quant * binder list * term

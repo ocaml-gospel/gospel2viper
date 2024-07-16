@@ -23,6 +23,7 @@ let assertspace = string "assert "
 let spaceeqspace = string " == "
 let spaceinspace = string " in "
 let notspace = string "not "
+let old = string "old"
 let ifspace = string "if "
 let spaceelsespace = string " else "
 let spaceintmarkspace = string " ? "
@@ -95,6 +96,7 @@ and pp_term = function
     parens (pp_term tif ^^ spaceintmarkspace ^^
     pp_term tthen ^^ spacecolonspace ^^ pp_term telse)
   | TNot term -> notspace ^^ parens (pp_term term)
+  | TOld term -> old ^^ parens(pp_term term)
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)

@@ -31,6 +31,7 @@ and term =
     (* bterm ? t1 : t2 *)
   | TNot of term
     (* not t *)
+  | TOld of term
 and tseq =
   | TEmpty of ty
     (* Seq[Int]() *)

@@ -609,7 +609,7 @@ let struct_desc = function
       let returns = merge_returns ret_names_opt tys_opt in
       [DMethod {
         method_name = ppat_to_str spvb_pat.ppat_desc;
-        method_args = args @ ghost_args;
+        method_args = (List.rev args) @ ghost_args;
         method_returns = returns;
         method_spec = {
           spec_pre  = pre;

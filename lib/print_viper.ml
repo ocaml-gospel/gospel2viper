@@ -134,8 +134,9 @@ let rec pp_expr = function
   | EAssig (e1, e2) -> pp_expr e1 ^^ spaceassignspace ^^ pp_expr e2
   | EVar (lbl, ty)  -> varspace ^^ string lbl ^^ spacecolonspace ^^ pp_ty ty
   | ESequence (e1, e2) ->
-    (match e1 with
-    | ESkip -> pp_expr e2
+    (match e1, e2 with
+    | ESkip, _ -> pp_expr e2
+    | _, ESkip -> pp_expr e1
     | _ -> pp_expr e1 ^^ hardline ^^ pp_expr e2)
   | EAssert e -> assertspace ^^ pp_expr e
 and pp_eseq = function

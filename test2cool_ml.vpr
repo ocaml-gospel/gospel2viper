@@ -1,0 +1,68 @@
+field value: Int
+
+field next: Ref
+
+predicate lseg(from: Ref, to: Ref) {
+  (
+    (from != to) ? (
+      (acc(from.next) && acc(from.value)) && lseg(from.next, to)
+    ) : true
+  )
+}
+
+function _constr_model_lseg_(from: Ref, to: Ref): Seq[Int] requires lseg(
+  from, to
+) {
+  (
+    (from == to) ? Seq[Int]() : (
+      Seq(from.value) ++ _constr_model_lseg_(from.next, to)
+    )
+  )
+}
+
+field length: Int
+
+field first: Ref
+
+field last: Ref
+
+predicate queue(q: Ref) {
+  (
+    ((acc(q.last) && acc(q.first)) && acc(q.length)) && (
+      (q.last == null) ? ((q.first == null) && (q.length == 0)) : (
+        lseg(q.first, q.last) && lseg(q.last, null)
+      )
+    )
+  )
+}
+
+function _constr_model_queue_(q: Ref): Seq[Int]  {
+  ((q.length < 0) ? Seq[Int]() : _constr_model_lseg_(q.first, q.last))
+}
+
+method create()
+returns (q: Ref)
+ensures queue(q) && (q.view == Seq[Int]()){
+  var q : Ref
+  q := new(length, first, last)
+  q.length := 0
+  q.first := null
+  q.last := null
+  q := q
+}
+
+method clear(q: Ref)
+requires queue(q)
+ensures queue(q) && (q.view == Seq[Int]()){
+  q.length := 0
+  q.first := null
+  q.last := null
+}
+
+method clear_alt(q: Ref)
+requires ((acc(q.last) && acc(q.first)) && acc(q.length))
+ensures queue(q) && (q.view == Seq[Int]()){
+  q.length := 0
+  q.first := null
+  q.last := null
+}

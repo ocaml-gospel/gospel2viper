@@ -13,6 +13,7 @@ let rec pp_ty ty =
     if tys <> [] then Format.printf "[";
     List.iter (fun e -> pp_ty e) tys; Format.printf "]"
   | TyVar s -> Format.printf "%s" s
+  | TyEmpty -> Format.printf "EMPTY TYPE"
 
 let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
   Printf.printf "%s -> \n" x; Format.printf "\tfields:: ";
@@ -121,6 +122,72 @@ let get_payload_lbl = function
   *)
   | _ -> assert false (* TODO *)
 
+let rec id_to_string = function
+  | Uast.Qpreid s -> s.pid_str
+  | Qdot (qualid, s) -> id_to_string qualid ^ "." ^ s.pid_str
+
+let is_field_null ty_ht field_name =
+  Hashtbl.fold (fun _ y acc -> acc ||
+  match y.null_field with None -> false | Some s -> s = field_name) ty_ht false
+
+let rec term_to_expr term =
+  match term.Gospel.Uast.term_desc with
+  | Ttrue -> EBool true
+  | Tpreid id ->
+    (match id_to_string id with
+    | "[]" | "empty" | "Sequence.empty" -> ESeq (EEmpty (TyVar "Int"))
+    | null_field when is_field_null ty_ht null_field -> ENull
+    | default -> EVariable default)
+  | Tfield (term, qualid) -> EField (term_to_expr term, id_to_string qualid)
+  | Tapply (_hd, _t) ->
+    let rec aux e = match e.Gospel.Uast.term_desc with
+    | Tapply (t1, t2) -> (aux t1) @ [t2]
+    | _ -> [e] in
+    let tl = aux term in
+    let fun_name = (match (List.hd tl).term_desc with
+    | Tpreid s -> id_to_string s
+    | _ -> assert false) in
+    let args = List.tl (to_term_list tl) in
+    (match fun_name with
+    | "get" | "Sequence.get" ->
+      (match args with
+      | [n; num] -> ESeq (EGet (n, num))
+      | _ -> assert false)
+    | "length" | "Sequence.length" -> ESeq (ELength (List.hd args))
+    | "tl" | "Sequence.tl"     ->
+      ESeq (ESub (List.hd args, (EConst (CInt 1)), None))
+    | "hd" | "Sequence.hd"     ->
+      ESeq (EGet (List.hd args, (EConst (CInt 0))))
+    | "singleton" | "Sequence.singleton" -> ESeq (ESingleton (List.hd args))
+    | default  -> EApp (default, args))
+  | Tidapp (id, es) ->
+    let str = id_to_string id in
+    if String.starts_with ~prefix:"mixfix" str then
+      (match str, es with
+      | "mixfix [_]",    [name; e2] ->
+        ESeq (EGet (term_to_expr name, term_to_expr e2))
+      | "mixfix [_.._]", [name; min; max] ->
+        ESeq (ESub
+        (term_to_expr name, term_to_expr min, Some(term_to_expr max)))
+      | "mixfix [.._]",  [name; max] ->
+        ESeq (ESub
+        (term_to_expr name, EConst (CInt 0), Some(term_to_expr max)))
+      | "mixfix [_..]",  [name; min] ->
+        ESeq (ESub (term_to_expr name, term_to_expr min, None))
+      | _ -> assert false)
+    else (match es with
+    | [e1; e2] ->
+      EInfix (term_to_expr e1, keyword (id_to_string id), term_to_expr e2)
+    | _ -> assert false)
+  | Tconst c -> (match c with
+    | Pconst_integer (s, _) -> EConst (CInt (int_of_string s))
+    | _ -> assert false)
+  | _ -> assert false
+and to_term_list tl =
+  match tl with
+  | [] -> []
+  | hd :: tl -> term_to_expr hd :: to_term_list tl
+
 let rec get_attributes = function
   | [] -> []
   | attr :: tl ->
@@ -149,10 +216,6 @@ let to_type_def decl =
   | Ptype_open
   *)
   | _ -> assert false (* TODO *)
-
-let rec id_to_string = function
-  | Uast.Qpreid s -> s.pid_str
-  | Qdot (qualid, s) -> id_to_string qualid ^ "." ^ s.pid_str
 
 let rec get_ty_lbl = function
   | Uast.PTtyapp (Qpreid preid, []) -> keyword preid.pid_str
@@ -202,10 +265,6 @@ let to_binop = function
   | Timplies -> BImpl
   | Tiff -> assert false
 
-let is_field_null ty_ht field_name =
-  Hashtbl.fold (fun _ y acc -> acc ||
-  match y.null_field with None -> false | Some s -> s = field_name) ty_ht false
-
 let rec to_term term =
   match term.Gospel.Uast.term_desc with
   | Ttrue  -> TBool true
@@ -222,12 +281,15 @@ let rec to_term term =
     | default -> TVar default)
   | Tfield (t, field_id) ->
     TField ((to_term t), id_to_string field_id)
-  | Tapply (hd, t) ->
-    let argv = to_term_list hd @ to_term_list t in
-    let args = List.tl argv in
-    let fun_name = (match List.hd argv with
-    | TVar s -> s
+  | Tapply (_hd, _t) ->
+    let rec aux e : Gospel.Uast.term list= match e.Gospel.Uast.term_desc with
+    | Tapply (t1, t2) -> (aux t1) @ [t2]
+    | _ -> [e] in
+    let tl = aux term in
+    let fun_name = (match (List.hd tl).term_desc with
+    | Tpreid s -> id_to_string s
     | _ -> assert false) in
+    let args = List.tl (to_term_list tl) in
     (match fun_name with
     | "get" | "Sequence.get" ->
       (match args with
@@ -274,6 +336,7 @@ let rec to_term term =
     mk_and fields_acc
   | Tpoints (Qdot _, _) -> assert false (* TODO *)
   | Told t -> TOld (to_term t)
+  | Tunfolding (t1, t2) -> TUnfolding (to_term t1, to_term t2)
   (*
   | Tnot of term
   | Tquant of quant * binder list * term
@@ -284,14 +347,12 @@ let rec to_term term =
   | Trecord of (qualid * term) list
   | Tupdate of term * (qualid * term) list
   | Tscope of qualid * term
-  | Told of term
   *)
   | _ -> assert false (* TODO *)
-and to_term_list t =
-  (match t.Gospel.Uast.term_desc with
-  | Gospel.Uast.Tpreid _ -> [to_term t]
-  | Tapply (hd, t2) -> to_term_list hd @ to_term_list t2
-  | _ -> [to_term t])
+and to_term_list (tl : Gospel.Uast.term list) : term list =
+  match tl with
+  | [] -> []
+  | hd :: tl -> to_term hd :: to_term_list tl
 
 let to_body = function
   | None -> None
@@ -347,6 +408,7 @@ let constraint_to_lbl_ty pattern =
     Some (ppat_to_str pattern.ppat_desc, ptyp_to_ty ty.ptyp_desc)
   | Ppat_construct (_, None) -> None
   | Ppat_construct (_, _some) -> assert false
+  | Ppat_var str_loc -> Some (str_loc.txt, TyEmpty)
   | _ -> failwith "ERROR: Constraint required"
 
 let rec unstack_expr expr acc =
@@ -396,6 +458,15 @@ let rec to_expr expr =
     | _ -> assert false)
   | Sexp_assert e -> EAssert (to_expr e)
   | Sexp_field (e, id) -> EField (to_expr e, longident_to_str id.txt)
+  | Sexp_viper_call (opt, expr) -> (match opt with
+    | None -> failwith "No gospel attributes"
+    | Some t ->
+      let call_viper = (match t.keyword with
+      | Uast.Fold -> EFold (term_to_expr t.desc)
+      | Uast.Unfold -> EUnfold (term_to_expr t.desc)
+      | Uast.Apply  -> (term_to_expr t.desc) ) in
+      ESequence (call_viper, to_expr expr)
+    )
   (*
   | Sexp_function of s_case list
   | Sexp_fun of
@@ -404,16 +475,12 @@ let rec to_expr expr =
       * Parsetree.pattern
       * s_expression
       * fun_spec option
-  | Sexp_apply of s_expression * (arg_label * s_expression) list
   | Sexp_match of s_expression * s_case list
   | Sexp_try of s_expression * s_case list
   | Sexp_tuple of s_expression list
   | Sexp_variant of label * s_expression option
   | Sexp_record of (Longident.t loc * s_expression) list * s_expression option
-  | Sexp_field of s_expression * Longident.t loc
   | Sexp_array of s_expression list
-  | Sexp_ifthenelse of s_expression * s_expression * s_expression option
-  | Sexp_sequence of s_expression * s_expression
   | Sexp_while of s_expression * s_expression * loop_spec option
   | Sexp_for of
       Parsetree.pattern
@@ -455,16 +522,21 @@ and to_expr_ret expr ret_val =
     EAssig (ret_val, EConst (to_const c))
   | Sexp_let (_, binding :: _and, e2) ->
     let e1 = binding.spvb_expr in
-    (match constraint_to_lbl_ty binding.spvb_pat with
-    | Some (let_name, let_ty) ->
+    (match constraint_to_lbl_ty binding.spvb_pat, ret_val with
+    | Some (let_name, let_ty), EVariable ret_val_str ->
+      if let_name = ret_val_str then
+        ESequence (to_expr_ret e1 (EVariable let_name), to_expr_ret e2 ret_val)
+      else
       ESequence (
         ESequence (
           EVar (let_name, let_ty), to_expr_ret e1 (EVariable let_name)
         ), to_expr_ret e2 ret_val)
-    | None -> failwith "constraint is None")
+    | _, _ -> failwith "constraint is None")
   | Sexp_let (_rec, [], _expr) -> assert false
   | Sexp_ident id ->
-    EAssig (ret_val, EVariable (longident_to_str id.txt))
+    (match ret_val, longident_to_str id.txt with
+    | EVariable str, id_txt when str = id_txt -> ESkip
+    | ret_val, id_txt -> EAssig (ret_val, EVariable id_txt))
   | Sexp_constraint (expr, _ty) -> to_expr_ret expr ret_val
   | Sexp_field (expr, id) ->
     EAssig (ret_val, EField (to_expr expr, longident_to_str id.txt))
@@ -483,6 +555,16 @@ and to_expr_ret expr ret_val =
   | Sexp_construct (_id_loc, expr_opt) -> (match expr_opt with
     | None -> ENull (* TODO *)
     | Some expr -> to_expr_ret expr ret_val)
+  | Sexp_assert expr -> EAssert (to_expr expr)
+  | Sexp_viper_call (opt, expr) -> (match opt with
+    | None -> failwith "No gospel attributes"
+    | Some t ->
+      let call_viper = (match t.keyword with
+      | Uast.Fold -> EFold (term_to_expr t.desc)
+      | Uast.Unfold -> EUnfold (term_to_expr t.desc)
+      | Uast.Apply  -> (term_to_expr t.desc) ) in
+      ESequence (call_viper, to_expr_ret expr ret_val)
+  )
   (*
   | Sexp_function of s_case list
   | Sexp_fun of
@@ -507,7 +589,7 @@ and to_expr_ret expr ret_val =
       Parsetree.pattern
       * s_expression
       * s_expression
-      * direction_flag
+      * direction_flag  (* fold queue q *)
       * s_expression
       * loop_spec option
   | Sexp_coerce of s_expression * core_type option * core_type

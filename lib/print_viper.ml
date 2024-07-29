@@ -22,6 +22,8 @@ let crlet = string "let "
 let assertspace = string "assert "
 let spaceeqspace = string " == "
 let spaceinspace = string " in "
+let unfoldingspace = string "unfolding "
+let spacein = string " in"
 let notspace = string "not "
 let old = string "old"
 let ifspace = string "if "
@@ -29,6 +31,8 @@ let spaceelsespace = string " else "
 let spaceintmarkspace = string " ? "
 let spacecolonspace = string " : "
 let not = string "!"
+let unfoldspace = string "unfold "
+let foldspace = string "fold "
 let minus = string "!"
 let varspace = string "var "
 let spaceandandspace = string " && "
@@ -72,6 +76,7 @@ let rec pp_ty = function
   | TyApp (s, tys) ->
     string s ^^ (if tys == [] then empty else brackets (pp_list pp_ty tys))
   | TyVar s -> string s
+  | TyEmpty -> assert false
 and pp_term = function
   | TConst n -> pp_const n
   | TBool  b -> if b then ttrue else ffalse
@@ -97,6 +102,7 @@ and pp_term = function
     pp_term tthen ^^ spacecolonspace ^^ pp_term telse)
   | TNot term -> notspace ^^ parens (pp_term term)
   | TOld term -> old ^^ parens(pp_term term)
+  | TUnfolding (t1, t2) -> unfoldingspace ^^ pp_term t1 ^^ spacein ^^ pp_term t2
 and pp_tseq = function
   | TEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | TSingleton term -> string "Seq" ^^ parens (pp_term term)
@@ -139,6 +145,8 @@ let rec pp_expr = function
     | _, ESkip -> pp_expr e1
     | _ -> pp_expr e1 ^^ hardline ^^ pp_expr e2)
   | EAssert e -> assertspace ^^ pp_expr e
+  | EFold e -> foldspace ^^ pp_expr e
+  | EUnfold e -> unfoldspace ^^ pp_expr e
 and pp_eseq = function
   | EEmpty ty -> pp_ty (TyApp("Seq", [ty])) ^^ parens empty
   | ESingleton expr -> string "Seq" ^^ parens (pp_expr expr)

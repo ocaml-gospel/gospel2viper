@@ -5,6 +5,7 @@ type label = string
 type ty =
   | TyApp of label * (ty list)
   | TyVar of label
+  | TyEmpty
 
 type const = CInt of int
 
@@ -32,6 +33,8 @@ and term =
   | TNot of term
     (* not t *)
   | TOld of term
+  | TUnfolding of term * term
+    (* unfolding t in *)
 and tseq =
   | TEmpty of ty
     (* Seq[Int]() *)
@@ -72,8 +75,12 @@ and expr =
   | EAssig of expr * expr
     (* e1 := e2 *)
   | ESequence of expr * expr
-     (* e1
-        e2 *)
+    (* e1
+       e2 *)
+  | EUnfold of expr
+    (* unfold e *)
+  | EFold of expr
+    (* fold e *)
   | EAssert of expr
 and eseq =
   | EEmpty of ty

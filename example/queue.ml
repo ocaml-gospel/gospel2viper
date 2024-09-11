@@ -33,9 +33,9 @@ type queue = {
 (*@ requires queue q *)
 
 let create () : queue =
-  let r : queue = Cons { length = 0; first = Nil; last = Nil } in
-  (* fold queue q *)
-  r
+  let q : queue = Cons { length = 0; first = Nil; last = Nil } in
+  (*@ fold queue q *)
+  q
 (*@ q = create ()
       ensures queue q
       ensures (constr_model_queue q) = empty *)

@@ -159,6 +159,10 @@ let rec term_to_expr term =
     | "hd" | "Sequence.hd"     ->
       ESeq (EGet (List.hd args, (EConst (CInt 0))))
     | "singleton" | "Sequence.singleton" -> ESeq (ESingleton (List.hd args))
+    | "cons" | "Sequence.cons" ->
+      (match args with
+      | [x; seq] -> ESeq (EConcat (ESeq (ESingleton x), seq))
+      | _ -> assert false)
     | default  -> EApp (default, args))
   | Tidapp (id, es) ->
     let str = id_to_string id in
@@ -301,6 +305,10 @@ let rec to_term term =
     | "hd" | "Sequence.hd"     ->
       TSeq (TGet (List.hd args, (TConst (CInt 0))))
     | "singleton" | "Sequence.singleton" -> TSeq (TSingleton (List.hd args))
+    | "cons" | "Sequence.cons" ->
+      (match args with
+      | [x; seq] -> TSeq (TConcat (TSeq (TSingleton x), seq))
+      | _ -> assert false)
     | default  -> TApp (None, default, args))
   | Tlet (name, t1, t2) ->
     TLet (name.pid_str, to_term t1, to_term t2)
@@ -565,51 +573,35 @@ and to_expr_ret expr ret_val =
       | Uast.Apply  -> (term_to_expr t.desc) ) in
       ESequence (call_viper, to_expr_ret expr ret_val)
   )
-  (*
-  | Sexp_function of s_case list
-  | Sexp_fun of
-      arg_label
-      * s_expression option
-      * Parsetree.pattern
-      * s_expression
-      * fun_spec option
-  | Sexp_apply of s_expression * (arg_label * s_expression) list
-  | Sexp_match of s_expression * s_case list
-  | Sexp_try of s_expression * s_case list
-  | Sexp_tuple of s_expression list
-  | Sexp_construct of Longident.t loc * s_expression option
-  | Sexp_variant of label * s_expression option
-  | Sexp_field of s_expression * Longident.t loc
-  | Sexp_setfield of s_expression * Longident.t loc * s_expression
-  | Sexp_array of s_expression list
-  | Sexp_ifthenelse of s_expression * s_expression * s_expression option
-  | Sexp_sequence of s_expression * s_expression
-  | Sexp_while of s_expression * s_expression * loop_spec option
-  | Sexp_for of
-      Parsetree.pattern
-      * s_expression
-      * s_expression
-      * direction_flag  (* fold queue q *)
-      * s_expression
-      * loop_spec option
-  | Sexp_coerce of s_expression * core_type option * core_type
-  | Sexp_send of s_expression * label loc
-  | Sexp_new of Longident.t loc
-  | Sexp_setinstvar of label loc * s_expression
-  | Sexp_override of (label loc * s_expression) list
-  | Sexp_letmodule of string option loc * module_expr * s_expression
-  | Sexp_letexception of extension_constructor * s_expression
-  | Sexp_assert of s_expression
-  | Sexp_lazy of s_expression
-  | Sexp_poly of s_expression * core_type option
-  | Sexp_object of class_structure
-  | Sexp_newtype of string loc * s_expression
-  | Sexp_pack of s_module_expr
-  | Sexp_open of open_declaration * s_expression
-  | Sexp_letop of letop
-  | Sexp_extension of extension
-  | Sexp_unreachable
-  *)
+  | Sexp_sequence (e1, e2) -> ESequence (to_expr_ret e1 ret_val, to_expr_ret e2 ret_val) (* to_expr_ret or to_expr ?? *)
+  | Sexp_setfield (e1, id, e2) ->
+    EAssig (EField (to_expr e1, longident_to_str id.txt), to_expr e2)
+(*
+  | Sexp_function _ -> assert false
+  | Sexp_fun _ -> assert false
+  | Sexp_match _ -> assert false
+  | Sexp_try _ -> assert false
+  | Sexp_tuple _ -> assert false
+  | Sexp_variant _ -> assert false
+  | Sexp_array _ -> assert false
+  | Sexp_while _ -> assert false
+  | Sexp_for _ -> assert false
+  | Sexp_coerce _ -> assert false
+  | Sexp_send _ -> assert false
+  | Sexp_new _ -> assert false
+  | Sexp_setinstvar _ -> assert false
+  | Sexp_override _ -> assert false
+  | Sexp_letmodule _ -> assert false
+  | Sexp_letexception _ -> assert false
+  | Sexp_lazy _ -> assert false
+  | Sexp_poly _ -> assert false
+  | Sexp_object _ -> assert false
+  | Sexp_newtype _ -> assert false
+  | Sexp_pack _ -> assert false
+  | Sexp_open _ -> assert false
+  | Sexp_letop _ -> assert false
+  | Sexp_extension _ -> assert false
+  | Sexp_unreachable -> assert false *)
   | _ -> assert false (* TODO *)
 
 let to_meth_body body = function

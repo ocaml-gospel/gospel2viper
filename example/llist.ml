@@ -1,22 +1,20 @@
 type llist =
   Nil[@viper "null"] |
   Cons of { mutable value : int; mutable next : llist }
-(*@ mutable model view : integer sequence *)
 
-(*@ predicate llist_pred (this: llist) =
+(*@ predicate llist (this: llist) =
     if this <> Nil then
       this ~~> {value; next} &&
-      llist_pred this.next
-    else true
-*)
+      llist this.next
+    else true *)
 
-(*@ function _constr_model_ (t: llist) : int sequence =
-    if t = Nil then empty else singleton t.value ++ _constr_model_(t.next) *)
-(*@ requires llist_pred t *)
+(*@ function constr_model_llist (t: llist) : int sequence =
+    if t = Nil then empty else singleton t.value ++ constr_model_llist t.next *)
+(*@ requires llist t *)
 
-
-let prepend (x: int) (l: llist) : llist = Cons { value = x; next = l }
+let prepend (x: int) (l: llist) : llist =
+  Cons { value = x; next = l }
 (*@ nl = prepend x l
-    requires llist_pred l
-    ensures  llist_pred nl
-    ensures  nl.view = ((singleton x) ++ old(l.view)) *)
+    requires llist l
+    ensures  llist nl
+    ensures  constr_model_llist nl = ((singleton x) ++ old(constr_model_llist l)) *)

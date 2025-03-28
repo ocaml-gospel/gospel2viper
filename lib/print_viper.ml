@@ -210,12 +210,24 @@ let pp_function_def f =
   colonspace ^^ pp_ty f.function_rety ^^ space ^^
   pp_spec f.function_spec ^^ space ^^ pp_term_body f.function_body
 
+let rec pp_adt_cont name = function
+  | [] -> empty
+  | (lbl, arg_opt) :: tl ->
+    string lbl ^^
+      match arg_opt with
+      | Some targ -> pp_args [targ]
+      | None -> parens(empty) ^^
+    break 1 ^^
+    pp_adt_cont name tl
+
 let pp_decl = function
   | DPredicate pred_def -> pp_predicate_def pred_def
   | DMethod method_def  -> pp_method_def method_def
   | DFunction function_def -> pp_function_def function_def
   | DField (name, ty) ->
       string "field" ^^ space ^^ string name ^^ colonspace ^^ pp_ty ty
+  | DAdt (name, l) ->
+      string "adt" ^^ space ^^ string name ^^ braces(pp_adt_cont name l)
   | DBlank -> empty
 
 let is_blank = function | DBlank -> true | _ -> false

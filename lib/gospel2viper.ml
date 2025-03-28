@@ -2,9 +2,11 @@ open Gospel
 open Viper_ast
 
 type type_storage = {
+  mutable adt_case: (string * string option) list;
+  (* (Nil, None), (Cons, Some CELL)  *)
   mutable fields: string list;
   mutable models: (string * ty) list;
-  mutable null_field: string option; }
+}
 
 (* printers for debuging *)
 let rec pp_ty ty =
@@ -21,12 +23,14 @@ let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
   Format.printf "\n\tmodels::";
   List.iter (fun (m, ty)->
     Format.printf "(%s: " m; pp_ty ty; Format.printf ")") y.models;
-  Format.printf "\n\tnull_field:: %s"
-    (match y.null_field with None -> "None" | Some s -> "Some " ^ s);
+  Format.printf "\n\tadt_case::";
+  List.iter (fun (case, ty_opt)->
+    Format.printf "(%s: " case; Format.printf "%s"(match ty_opt with | Some l -> l | None -> ""); Format.printf ")") y.adt_case;
   Format.printf "@.") ty_ht
 
 (* stores data from ocaml type definition *)
 let ty_ht : (string, type_storage) Hashtbl.t = Hashtbl.create 8
+let adt_store : (string, string) Hashtbl.t = Hashtbl.create 8
 
 let is_infix str =
   List.mem str ["+"; "-"; "*"; "/"; ">"; ">="; "<"; "<="; "=="; "!="]
@@ -52,9 +56,10 @@ let core_type_to_ty t =
   match t.Parsetree.ptyp_desc with
   | Ptyp_constr (id, []) ->
     (match id.txt with
-    | Lident s -> if Hashtbl.mem ty_ht s
-      then TyApp ("Ref", [])
-      else TyApp (keyword s, [])
+    | Lident s ->
+      (* if Hashtbl.mem ty_ht s
+      then TyApp (s, []) *)
+      TyApp (keyword s, [])
     | _ -> assert false)
   | Ptyp_constr _ -> assert false
   (*
@@ -78,15 +83,6 @@ let rec lbls_to_field = function
     let sl, decls = lbls_to_field tl in
     lbl.Parsetree.pld_name.txt :: sl,
     DField (lbl.pld_name.txt, core_type_to_ty lbl.pld_type) :: decls
-
-let rec constr_to_field = function
-  | [] -> [], []
-  | constr :: tl ->
-    let (pre_sl, pre_decls) = (match constr.Parsetree.pcd_args with
-    | Pcstr_tuple [] -> ([], [])
-    | Pcstr_record lbls -> lbls_to_field lbls
-    | _ -> assert false) in
-    let sl, decls = constr_to_field tl in pre_sl @ sl, pre_decls @ decls
 
 let get_payload_lbl = function
   | Parsetree.PStr [{pstr_desc; _}] ->
@@ -126,17 +122,13 @@ let rec id_to_string = function
   | Uast.Qpreid s -> s.pid_str
   | Qdot (qualid, s) -> id_to_string qualid ^ "." ^ s.pid_str
 
-let is_field_null ty_ht field_name =
-  Hashtbl.fold (fun _ y acc -> acc ||
-  match y.null_field with None -> false | Some s -> s = field_name) ty_ht false
-
 let rec term_to_expr term =
   match term.Gospel.Uast.term_desc with
   | Ttrue -> EBool true
   | Tpreid id ->
     (match id_to_string id with
     | "[]" | "empty" | "Sequence.empty" -> ESeq (EEmpty (TyVar "Int"))
-    | null_field when is_field_null ty_ht null_field -> ENull
+    | "Nil" -> ENull
     | default -> EVariable default)
   | Tfield (term, qualid) -> EField (term_to_expr term, id_to_string qualid)
   | Tapply (_hd, _t) ->
@@ -202,19 +194,33 @@ let find_attribute attrs target_name target_field =
   List.exists (fun (name, field) ->
     name = target_name && field = target_field) attrs
 
+let construct_adt variant tname =
+  let fields, adt_cont =
+    List.fold_left
+      (fun (fields, acc) e ->
+         let name = e.Parsetree.pcd_name.txt in
+         match e.Parsetree.pcd_args with
+         | Pcstr_tuple _l -> (fields, (name, None) :: acc) (* TODO *)
+         | Pcstr_record lbls ->
+           let new_fields = lbls_to_field lbls in
+           let in_name = String.uppercase_ascii tname in
+           assert(tname <> in_name);
+           Hashtbl.add adt_store name in_name;
+           (new_fields, (name, Some(in_name, TyVar("Ref"))) :: acc)
+      )
+      (([], []), [])
+      variant
+  in
+  List.rev adt_cont, fields
+
 let to_type_def decl =
   match decl.Uast.tkind with
   | Ptype_record lbls ->
-    lbls_to_field lbls, None
+    lbls_to_field lbls
   | Ptype_variant constr_l ->
-    (match constr_l with
-    | constr :: _tl ->
-      let attrs = get_attributes constr.pcd_attributes in
-      let str_opt = if find_attribute attrs "viper" "null"
-        then Some (constr.pcd_name.txt)
-        else None in
-      constr_to_field constr_l, str_opt
-    | _ -> assert false)
+    let tname = decl.Uast.tname.txt in
+    let adt_cont, (label_list, decl_list) = construct_adt constr_l tname in
+    label_list, DAdt (tname, adt_cont) :: decl_list
   (*
   | Ptype_abstract
   | Ptype_open
@@ -281,7 +287,7 @@ let rec to_term term =
   | Tpreid id ->
     (match id_to_string id with
     | "empty" | "Sequence.empty" -> TSeq (TEmpty (TyVar "Int"))
-    | null_field when is_field_null ty_ht null_field -> TNull
+    | "Nil" -> TNull
     | default -> TVar default)
   | Tfield (t, field_id) ->
     TField ((to_term t), id_to_string field_id)
@@ -345,6 +351,38 @@ let rec to_term term =
   | Tpoints (Qdot _, _) -> assert false (* TODO *)
   | Told t -> TOld (to_term t)
   | Tunfolding (t1, t2) -> TUnfolding (to_term t1, to_term t2)
+  | Tcase (t, (pat, term) :: []) ->
+    let pat_name, arg =
+      match pat.Uast.pat_desc with
+      | Uast.Papp (q, pat_list) ->
+        id_to_string q,
+        List.map (fun p ->
+        match p.Uast.pat_desc with
+        | Uast.Pvar v -> v.pid_str
+        | _ -> assert false
+    ) pat_list
+      (*
+      | Uast.Pwild -> assert false
+      | Uast.Pvar _ -> assert false
+      | Uast.Prec _ -> assert false
+      | Uast.Ptuple _ -> assert false
+      | Uast.Pas _ -> assert false
+      | Uast.Por _ -> assert false
+      | Uast.Pcast _ -> assert false
+      *)
+      | _ -> assert false
+    in
+    let tname = Hashtbl.find adt_store pat_name in
+    TBinop(
+    TField((to_term t), String.cat "is" pat_name),
+    BAnd,
+    TLet(List.hd arg, TField((to_term t), tname), (to_term term))
+    )
+
+
+
+    (* TSeq() *)
+  | Tcase (_, _) -> assert false
   (*
   | Tnot of term
   | Tquant of quant * binder list * term
@@ -356,7 +394,14 @@ let rec to_term term =
   | Tupdate of term * (qualid * term) list
   | Tscope of qualid * term
   *)
-  | _ -> assert false (* TODO *)
+  | Tnot _ -> assert false (* TODO *)
+  | Tquant _ -> assert false (* TODO *)
+  | Tattr _ -> assert false (* TODO *)
+  | Tcast _ -> assert false (* TODO *)
+  | Ttuple _ -> assert false (* TODO *)
+  | Trecord _ -> assert false (* TODO *)
+  | Tupdate _ -> assert false (* TODO *)
+  | Tscope _ -> assert false (* TODO *)
 and to_term_list (tl : Gospel.Uast.term list) : term list =
   match tl with
   | [] -> []
@@ -433,7 +478,7 @@ let rec to_expr expr =
   | Sexp_constant c -> EConst (to_const c)
   | Sexp_construct (id, _) ->
     (match longident_to_str id.Location.txt with
-    | null_field when is_field_null ty_ht null_field -> ENull
+    | "Nil" -> ENull
     | "()" -> ESkip
     | default -> EVariable default)
   | Sexp_ident id -> EVariable (longident_to_str id.txt)
@@ -652,9 +697,9 @@ let struct_desc = function
     | None -> []
     | Some spec -> get_spec_fields spec.ty_field) in
     Hashtbl.add ty_ht ty_decl.tname.txt
-      {fields = []; models = []; null_field = None};
-    let (fields, r), null_field = to_type_def ty_decl in
-    Hashtbl.replace ty_ht ty_decl.tname.txt {fields; models; null_field}; r
+      {adt_case = []; fields = []; models = []};
+    let (fields, r) = to_type_def ty_decl in
+    Hashtbl.replace ty_ht ty_decl.tname.txt {adt_case = []; fields; models}; r
   | Str_function f ->
     let args = to_args f.fun_params in
     (match f.fun_type with

@@ -7,6 +7,7 @@ type ty =
   | TyVar of label
   | TyEmpty
 
+type targ = label * ty
 type const = CInt of int
 
 and term =
@@ -66,7 +67,7 @@ and expr =
     (* if (bexpr) {e1} else {e2}
        if (bexpr) {e1}
     *)
-  | EVar of label * ty
+  | EVar of targ
     (* var t : Int *)
   | EField of expr * label
     (* t.e1 *)
@@ -103,20 +104,20 @@ type spec = {
 type predicate_def = {
   pred_name: label;
   pred_body: term option;
-  pred_args: (label * ty) list;
+  pred_args: (targ) list;
 }
 
 type method_def = {
   method_name: label;
-  method_args: (label * ty) list;
-  method_returns: (label * ty) list;
+  method_args: (targ) list;
+  method_returns: (targ) list;
   method_spec: spec;
   method_body: expr option;
 }
 
 type function_def = {
   function_name: label;
-  function_args: (label * ty) list;
+  function_args: (targ) list;
   function_rety: ty;
   function_spec: spec;
   function_body: term option;
@@ -126,7 +127,8 @@ type decl =
   | DPredicate of predicate_def
   | DMethod of method_def
   | DFunction of function_def
-  | DField of label * ty
+  | DField of targ
+  | DAdt of label * (label * (targ option)) list
   | DBlank
 
 type program = decl list

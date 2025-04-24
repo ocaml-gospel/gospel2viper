@@ -30,7 +30,7 @@ let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
 
 (* stores data from ocaml type definition *)
 let ty_ht : (string, type_storage) Hashtbl.t = Hashtbl.create 8
-let adt_store : (string, string) Hashtbl.t = Hashtbl.create 8
+let adt_store : (string, string option) Hashtbl.t = Hashtbl.create 8
 
 let is_infix str =
   List.mem str ["+"; "-"; "*"; "/"; ">"; ">="; "<"; "<="; "=="; "!="]
@@ -57,9 +57,9 @@ let core_type_to_ty t =
   | Ptyp_constr (id, []) ->
     (match id.txt with
     | Lident s ->
-      (* if Hashtbl.mem ty_ht s
-      then TyApp (s, []) *)
-      TyApp (keyword s, [])
+      if Hashtbl.mem ty_ht s
+      then TyApp (s, [])
+      else TyApp (keyword s, [])
     | _ -> assert false)
   | Ptyp_constr _ -> assert false
   (*
@@ -200,12 +200,14 @@ let construct_adt variant tname =
       (fun (fields, acc) e ->
          let name = e.Parsetree.pcd_name.txt in
          match e.Parsetree.pcd_args with
-         | Pcstr_tuple _l -> (fields, (name, None) :: acc) (* TODO *)
+         | Pcstr_tuple _l ->
+           Hashtbl.add adt_store name None;
+          (fields, (name, None) :: acc)
          | Pcstr_record lbls ->
            let new_fields = lbls_to_field lbls in
            let in_name = String.uppercase_ascii tname in
            assert(tname <> in_name);
-           Hashtbl.add adt_store name in_name;
+           Hashtbl.add adt_store name (Some in_name);
            (new_fields, (name, Some(in_name, TyVar("Ref"))) :: acc)
       )
       (([], []), [])
@@ -220,6 +222,7 @@ let to_type_def decl =
   | Ptype_variant constr_l ->
     let tname = decl.Uast.tname.txt in
     let adt_cont, (label_list, decl_list) = construct_adt constr_l tname in
+    Hashtbl.add 
     label_list, DAdt (tname, adt_cont) :: decl_list
   (*
   | Ptype_abstract
@@ -250,9 +253,12 @@ let rec to_args = function
   | (_, preid, pty) :: tl ->
     let ty = pty_to_ty pty in
     let str = get_ty_lbl pty in
-    (if Hashtbl.mem ty_ht str
+    Format.printf "%s@." str;
+    (preid.Identifier.Preid.pid_str, ty)
+    (* (if Hashtbl.mem ty_ht str
      then (preid.Identifier.Preid.pid_str, TyApp ("Ref", []))
-     else (preid.Identifier.Preid.pid_str, ty)) :: to_args tl
+     else (preid.Identifier.Preid.pid_str, ty)) *)
+     :: to_args tl
 
 let rec get_spec_fields = function
   | [] -> []
@@ -372,16 +378,16 @@ let rec to_term term =
       *)
       | _ -> assert false
     in
-    let tname = Hashtbl.find adt_store pat_name in
+    let tname_opt = Hashtbl.find adt_store pat_name in
     TBinop(
     TField((to_term t), String.cat "is" pat_name),
     BAnd,
-    TLet(List.hd arg, TField((to_term t), tname), (to_term term))
+    (match tname_opt with
+      | Some tname ->
+        TLet(List.hd arg, TField((to_term t), tname), (to_term term))
+      | None -> TLet(List.hd arg, to_term t, (to_term term))
     )
-
-
-
-    (* TSeq() *)
+    )
   | Tcase (_, _) -> assert false
   (*
   | Tnot of term

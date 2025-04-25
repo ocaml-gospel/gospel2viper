@@ -1,13 +1,6 @@
 open Gospel
 open Viper_ast
 
-type type_storage = {
-  mutable adt_case: (string * string option) list;
-  (* (Nil, None), (Cons, Some CELL)  *)
-  mutable fields: string list;
-  mutable models: (string * ty) list;
-}
-
 (* printers for debuging *)
 let rec pp_ty ty =
   match ty with
@@ -17,20 +10,27 @@ let rec pp_ty ty =
   | TyVar s -> Format.printf "%s" s
   | TyEmpty -> Format.printf "EMPTY TYPE"
 
-let pp_hashtbl ty_ht = Hashtbl.iter (fun x (y: type_storage) ->
-  Printf.printf "%s -> \n" x; Format.printf "\tfields:: ";
-  List.iter (fun field -> Format.printf "%s " field) y.fields;
-  Format.printf "\n\tmodels::";
-  List.iter (fun (m, ty)->
-    Format.printf "(%s: " m; pp_ty ty; Format.printf ")") y.models;
-  Format.printf "\n\tadt_case::";
-  List.iter (fun (case, ty_opt)->
-    Format.printf "(%s: " case; Format.printf "%s"(match ty_opt with | Some l -> l | None -> ""); Format.printf ")") y.adt_case;
-  Format.printf "@.") ty_ht
+type args = {
+  name: string;
+  ty: string;
+}
 
-(* stores data from ocaml type definition *)
-let ty_ht : (string, type_storage) Hashtbl.t = Hashtbl.create 8
-let adt_store : (string, string option) Hashtbl.t = Hashtbl.create 8
+type constructor = string * args list
+
+type adt = constructor list
+
+let adts : (string, adt) Hashtbl.t = Hashtbl.create 8
+
+let pp_adt adt = List.iter (fun (constructor, args) ->
+  Format.printf "%s : " constructor;
+  List.iter (fun arg -> Format.printf "{name: %s\tty: %s}@." arg.name arg.ty) args
+  ) adt
+
+let pp_adts adts = Hashtbl.iter (fun k v -> Format.printf "%s ->\n" k; pp_adt v) adts
+
+let types = ref ["Int"]
+
+let cons_name = "X"
 
 let is_infix str =
   List.mem str ["+"; "-"; "*"; "/"; ">"; ">="; "<"; "<="; "=="; "!="]
@@ -56,10 +56,7 @@ let core_type_to_ty t =
   match t.Parsetree.ptyp_desc with
   | Ptyp_constr (id, []) ->
     (match id.txt with
-    | Lident s ->
-      if Hashtbl.mem ty_ht s
-      then TyApp (s, [])
-      else TyApp (keyword s, [])
+    | Lident s -> TyApp (keyword s, [])
     | _ -> assert false)
   | Ptyp_constr _ -> assert false
   (*
@@ -78,11 +75,10 @@ let core_type_to_ty t =
   | _ -> assert false (* TODO *)
 
 let rec lbls_to_field = function
-  | [] -> [], []
+  | [] -> []
   | lbl :: tl ->
-    let sl, decls = lbls_to_field tl in
-    lbl.Parsetree.pld_name.txt :: sl,
-    DField (lbl.pld_name.txt, core_type_to_ty lbl.pld_type) :: decls
+    let decls = lbls_to_field tl in
+    DField (lbl.Parsetree.pld_name.txt, core_type_to_ty lbl.pld_type) :: decls
 
 let get_payload_lbl = function
   | Parsetree.PStr [{pstr_desc; _}] ->
@@ -195,24 +191,25 @@ let find_attribute attrs target_name target_field =
     name = target_name && field = target_field) attrs
 
 let construct_adt variant tname =
+  let adt : adt ref = ref [] in
   let fields, adt_cont =
     List.fold_left
       (fun (fields, acc) e ->
          let name = e.Parsetree.pcd_name.txt in
          match e.Parsetree.pcd_args with
          | Pcstr_tuple _l ->
-           Hashtbl.add adt_store name None;
+            adt := (name, []) :: !adt;
           (fields, (name, None) :: acc)
          | Pcstr_record lbls ->
            let new_fields = lbls_to_field lbls in
-           let in_name = String.uppercase_ascii tname in
-           assert(tname <> in_name);
-           Hashtbl.add adt_store name (Some in_name);
-           (new_fields, (name, Some(in_name, TyVar("Ref"))) :: acc)
+           adt := (name, [{name = cons_name; ty = "Ref";}]) :: !adt;
+           (new_fields, (name, Some(cons_name, TyVar("Ref"))) :: acc)
       )
-      (([], []), [])
+      ([], [])
       variant
   in
+  Hashtbl.add adts tname !adt;
+  types := tname :: !types;
   List.rev adt_cont, fields
 
 let to_type_def decl =
@@ -221,9 +218,8 @@ let to_type_def decl =
     lbls_to_field lbls
   | Ptype_variant constr_l ->
     let tname = decl.Uast.tname.txt in
-    let adt_cont, (label_list, decl_list) = construct_adt constr_l tname in
-    Hashtbl.add 
-    label_list, DAdt (tname, adt_cont) :: decl_list
+    let adt_cont, decl_list = construct_adt constr_l tname in
+    DAdt (tname, adt_cont) :: decl_list
   (*
   | Ptype_abstract
   | Ptype_open
@@ -253,12 +249,10 @@ let rec to_args = function
   | (_, preid, pty) :: tl ->
     let ty = pty_to_ty pty in
     let str = get_ty_lbl pty in
-    Format.printf "%s@." str;
-    (preid.Identifier.Preid.pid_str, ty)
-    (* (if Hashtbl.mem ty_ht str
-     then (preid.Identifier.Preid.pid_str, TyApp ("Ref", []))
-     else (preid.Identifier.Preid.pid_str, ty)) *)
-     :: to_args tl
+    (if List.mem str !types
+      then (preid.Identifier.Preid.pid_str, ty)
+      else (preid.Identifier.Preid.pid_str, TyApp ("Ref", []))
+    ) :: to_args tl
 
 let rec get_spec_fields = function
   | [] -> []
@@ -293,8 +287,9 @@ let rec to_term term =
   | Tpreid id ->
     (match id_to_string id with
     | "empty" | "Sequence.empty" -> TSeq (TEmpty (TyVar "Int"))
-    | "Nil" -> TNull
-    | default -> TVar default)
+    | "Nil" -> TVar("Nil()") (* Todo: universel version*)
+    | default -> TVar default
+    )
   | Tfield (t, field_id) ->
     TField ((to_term t), id_to_string field_id)
   | Tapply (_hd, _t) ->
@@ -378,16 +373,10 @@ let rec to_term term =
       *)
       | _ -> assert false
     in
-    let tname_opt = Hashtbl.find adt_store pat_name in
     TBinop(
     TField((to_term t), String.cat "is" pat_name),
     BAnd,
-    (match tname_opt with
-      | Some tname ->
-        TLet(List.hd arg, TField((to_term t), tname), (to_term term))
-      | None -> TLet(List.hd arg, to_term t, (to_term term))
-    )
-    )
+    TLet(List.hd arg, TField((to_term t), cons_name), (to_term term)))
   | Tcase (_, _) -> assert false
   (*
   | Tnot of term
@@ -400,14 +389,7 @@ let rec to_term term =
   | Tupdate of term * (qualid * term) list
   | Tscope of qualid * term
   *)
-  | Tnot _ -> assert false (* TODO *)
-  | Tquant _ -> assert false (* TODO *)
-  | Tattr _ -> assert false (* TODO *)
-  | Tcast _ -> assert false (* TODO *)
-  | Ttuple _ -> assert false (* TODO *)
-  | Trecord _ -> assert false (* TODO *)
-  | Tupdate _ -> assert false (* TODO *)
-  | Tscope _ -> assert false (* TODO *)
+  | _ -> assert false
 and to_term_list (tl : Gospel.Uast.term list) : term list =
   match tl with
   | [] -> []
@@ -455,9 +437,7 @@ let rec longident_to_str = function
 let rec ptyp_to_ty = function
   | Parsetree.Ptyp_constr (idloc, []) ->
     let str = keyword (longident_to_str idloc.txt) in
-    if Hashtbl.mem ty_ht str
-    then TyApp ("Ref", [])
-    else TyApp (str, []) (* TODO for multiple types like Seq[Int] *)
+    TyApp (str, []) (* TODO for multiple types like Seq[Int] *)
   | Ptyp_poly (_, ty) -> ptyp_to_ty ty.ptyp_desc
   | _  -> assert false
 
@@ -699,13 +679,11 @@ let merge_returns ret_names_opt tys_opt =
 let struct_desc = function
   | Uast.Str_type (_recf, ty_decl :: _ands) ->
     (* For the moment, no "and" in type declaration *)
-    let models = (match ty_decl.tspec with
+    let _models = (match ty_decl.tspec with
     | None -> []
     | Some spec -> get_spec_fields spec.ty_field) in
-    Hashtbl.add ty_ht ty_decl.tname.txt
-      {adt_case = []; fields = []; models = []};
-    let (fields, r) = to_type_def ty_decl in
-    Hashtbl.replace ty_ht ty_decl.tname.txt {adt_case = []; fields; models}; r
+    let r = to_type_def ty_decl in
+    r
   | Str_function f ->
     let args = to_args f.fun_params in
     (match f.fun_type with
